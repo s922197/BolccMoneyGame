@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.6 (動態優化版)</title>
+    <title>社畜生存戰：理財 Roguelike v2.7 (Bug Fix)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -211,7 +211,7 @@
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>❤️ <b>健康：</b>工時過長(>8hr)會扣健康，健康低容易生病破財</p>
-            <p>💼 <b>工作：</b>穩定工作只能一份，可隨時被新工作替換</p>
+            <p>💼 <b>工作：：</b>穩定工作只能一份，可隨時被新工作替換</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -524,6 +524,33 @@ const generators = {
             }
         };
     },
+    // 額外工作卡 (用於 T1 隨機池)
+    jobStableLow: () => {
+        const basePay = 150;
+        const pay = getDynamicPay(basePay);
+        return {
+            title: '🛒 便利商店店員',
+            tag: '低薪',
+            desc: `標準工時 **8 小時**。每輪收入 $${pay}。`,
+            effect: (p) => {
+                p.stableJob = { name: '便利商店店員', pay: pay, hours: 8, desc: '8hr/日' };
+                return '獲得穩定低薪工作 (8hr/日)';
+            }
+        };
+    },
+    jobStableMed: () => {
+        const basePay = 250;
+        const pay = getDynamicPay(basePay);
+        return {
+            title: '👨‍🏫 補習班老師',
+            tag: '中薪',
+            desc: `每日 **9 小時**。每輪收入 $${pay}。`,
+            effect: (p) => {
+                p.stableJob = { name: '補習班老師', pay: pay, hours: 9, desc: '9hr/日' };
+                return '獲得中等工作 (9hr/日)';
+            }
+        };
+    },
 
     // 兼職類 (疊加，有輪數)
     jobPartTime: () => {
@@ -552,7 +579,7 @@ const generators = {
             if (amtToDeposit <= 0) return '沒現金可存';
             p.cash -= amtToDeposit;
             p.bank += amtToDeposit;
-            log(`${p.name} 選擇存入 $${amtToDeposit} (佔比 ${(amtToDeposit / p.cash * 100).toFixed(0)}%)`);
+            log(`${p.name} 選擇存入 $${amtToDeposit} (佔比 ${(amtToDeposit / (p.cash + amtToDeposit) * 100).toFixed(0)}%)`);
             return `存入 $${amtToDeposit}`;
         }
     }),
@@ -642,13 +669,8 @@ function generateCards(playerIdx) {
 
     // T1: 固定為工作選擇
     if (gameState.turn === 1) {
-        pool = [
-            generators.jobStableStandard,
-            generators.jobStableShift,
-            generators.jobStableOvertime
-        ];
-        // T1 確保五張卡，補齊低薪和中薪
-        let t1Jobs = [
+        // T1 包含所有 5 種穩定工作類型
+        const t1Jobs = [
             generators.jobStableStandard,
             generators.jobStableShift,
             generators.jobStableOvertime,
@@ -656,18 +678,19 @@ function generateCards(playerIdx) {
             generators.jobStableMed
         ];
         
-        // 確保 T1 抽滿 5 張不重複
         let uniqueT1Deck = [];
         let t1Titles = new Set();
         
-        while(uniqueT1Deck.length < 5) {
-            let genFunc = t1Jobs[Math.floor(Math.random() * t1Jobs.length)];
-            let card = genFunc();
-            if (!t1Titles.has(card.title)) {
-                t1Titles.add(card.title);
-                uniqueT1Deck.push(card);
-            }
+        // 使用Fisher-Yates洗牌法確保隨機順序，並取前5個
+        for (let i = t1Jobs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [t1Jobs[i], t1Jobs[j]] = [t1Jobs[j], t1Jobs[i]];
         }
+
+        // T1 直接使用洗牌後的前 5 個 generator 實例化
+        // 由於 t1Jobs 已經包含 5 種不重複的生成器，可以直接全部實例化
+        uniqueT1Deck = t1Jobs.map(genFunc => genFunc());
+
         gameState.currentCards = uniqueT1Deck;
         
     } else {
@@ -692,7 +715,7 @@ function generateCards(playerIdx) {
         // T2+ 確保抽 5 張不重複
         let uniqueDeck = [];
         let cardTitles = new Set();
-        const maxAttempts = pool.length * 2; // 防止無限循環
+        const maxAttempts = pool.length * 2; 
         let attempts = 0;
 
         while(uniqueDeck.length < 5 && attempts < maxAttempts) {
@@ -722,10 +745,14 @@ function renderCards() {
         let tagClass = 'tag-none';
         if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
         else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
-        else if (card.tag.includes('健康') || card.tag.includes('特殊')) tagClass = 'tag-special';
+        else if (card.tag.includes('健康') || card.tag.includes('特殊') || card.tag.includes('理財')) tagClass = 'tag-special';
 
         // 存款卡片特殊標註
         let clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
+        
+        // 為了確保彈性存款正確顯示
+        if (card.title === '💰 彈性存款') tagClass = 'tag-special';
+
 
         div.innerHTML = `
             <div>
@@ -766,7 +793,7 @@ function processTurn() {
         }
 
         // 2. 生病判定
-        // 健康值越低，生病機率越高，邏輯符合要求
+        // 健康值越低，生病機率越高
         let sickChance = (100 - p.hp) * 0.5 / 100;
         if (Math.random() < sickChance) {
             let cost = 100;
