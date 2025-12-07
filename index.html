@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.1</title>
+    <title>社畜生存戰：理財 Roguelike v2.2 (UI優化版)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -25,26 +25,25 @@
             user-select: none;
         }
         .container {
-            max-width: 1200px; /* 增加最大寬度以容納單行儀表板 */
+            max-width: 1200px; 
             width: 100%;
         }
         
-        /* 儀表板 - 強制單行顯示 */
+        /* 儀表板 - 強制單行顯示，優化捲軸問題 */
         .dashboard {
             display: flex;
             justify-content: space-between;
             gap: 10px;
             margin-bottom: 15px;
-            overflow-x: auto; /* 允許橫向滾動 */
-            padding-bottom: 5px; 
+            /* 移除 overflow-x: auto; 依賴 player-stats 的 min-width 確保不換行 */
         }
         .player-stats {
             background: var(--card-bg);
-            padding: 10px 15px; 
+            padding: 8px 12px; /* 縮小內距 */
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            flex: 0 0 49%; /* 佔據約一半寬度，不換行 */
-            min-width: 350px; /* 確保最小寬度 */
+            flex: 0 0 49%; 
+            min-width: 350px; 
             border-top: 5px solid #bdc3c7;
             transition: all 0.3s;
             position: relative;
@@ -59,8 +58,8 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
-            margin: 4px 0;
-            font-size: 0.9em;
+            margin: 3px 0; /* 縮小間距 */
+            font-size: 0.85em; /* 略微縮小字體 */
             align-items: center;
         }
         .money { color: var(--accent); font-weight: bold; font-family: monospace; font-size: 1em; }
@@ -103,7 +102,6 @@
             position: relative;
         }
         .card:hover { transform: translateY(-3px); border-color: #bdc3c7; }
-        /* 移除 selected 樣式，因為點擊即執行 */
         .card.disabled {
             opacity: 0.5;
             pointer-events: none;
@@ -136,27 +134,38 @@
         .tag-none { background: #95a5a6; }
         .tag-special { background: #8e44ad; }
 
-        /* 日誌 */
+        /* 事件日誌優化 */
         .log-area {
             background: #fff;
             padding: 15px;
             border-radius: 8px;
-            height: 120px;
+            height: 150px; /* 增加高度 */
             overflow-y: auto;
             border: 1px solid #ddd;
             font-family: monospace;
-            font-size: 0.8em;
+            font-size: 1em; /* 調整為更顯眼的字體大小 */
         }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #eee; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px dashed #eee; padding-bottom: 2px; }
         .log-turn { color: #fff; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
         .log-bad { color: #c0392b; }
         .log-good { color: #27ae60; }
 
         /* 狀態文字小字 */
         .status-text { font-size: 0.75em; color: #7f8c8d; margin-top: 3px; line-height: 1.4; }
-
-        /* 移除行動區域，因為點擊即執行 */
-        .action-area { display: none; } 
+        
+        /* 開始按鈕 */
+        .confirm-btn {
+            padding: 12px 40px;
+            font-size: 1.2em;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #1e8449;
+            transition: transform 0.1s;
+        }
+        .confirm-btn:active { transform: translateY(4px); box-shadow: none; }
     </style>
 </head>
 <body>
@@ -235,9 +244,9 @@ const CONFIG = {
     baseRate: 0.01,
     startHp: 100,
     maxHp: 100,
-    safeHours: 8, // 每日安全工時
-    overworkPenalty: 3, // 每超時1小時扣除的健康值
-    turnsPerMonth: 4 // 遊戲中假設 1 輪 = 1 週, 故 1 月約 4 輪
+    safeHours: 8, 
+    overworkPenalty: 3, 
+    turnsPerMonth: 4 
 };
 
 let gameState = {
@@ -245,7 +254,7 @@ let gameState = {
     phase: 'p1_choice', 
     players: [],
     currentCards: [],
-    selectedCardIndex: null // 只需要一個選擇
+    selectedCardIndex: null 
 };
 
 // --- 初始化 ---
@@ -257,8 +266,8 @@ function createPlayer(name) {
         rate: CONFIG.baseRate,
         tempRateBoost: 0,
         hp: CONFIG.startHp,
-        stableJob: null, // { name, pay, hours, type }
-        partTimeJobs: [], // { name, pay, hours, turnsLeft }
+        stableJob: null, 
+        partTimeJobs: [], 
         investments: [],
         lockedSavings: [],
         roundIncome: 0
@@ -313,10 +322,9 @@ function handleCardClick(index) {
 // --- 卡牌生成器 ---
 
 // 計算預估月收入 (假設 1 輪 = 1 週, 1 月 = 4 輪)
-function getEstimatedMonthlyIncome(pay, hours) {
-    // 假設每週工作 5 天，每輪 1 週
-    let monthlyPay = pay * CONFIG.turnsPerMonth;
-    return monthlyPay;
+function getEstimatedMonthlyIncome(pay) {
+    // pay 是每輪收入
+    return pay * CONFIG.turnsPerMonth;
 }
 
 const generators = {
@@ -325,7 +333,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '💼 一般職員',
         tag: '穩定工作',
-        desc: `標準工時 **8 小時**。預估月收入 $${getEstimatedMonthlyIncome(200, 8)}。`,
+        desc: `標準工時 **8 小時**。預估月收入 $${getEstimatedMonthlyIncome(200)}。`,
         val: { pay: 200, hours: 8 }, 
         effect: (p) => {
             p.stableJob = { name: '一般職員', pay: 200, hours: 8, desc: '8hr/日' };
@@ -336,7 +344,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '🏭 產線作業員',
         tag: '做二休二',
-        desc: `每日 **10 小時**。高薪但有過勞風險。預估月收入 $${getEstimatedMonthlyIncome(300, 10)}。`,
+        desc: `每日 **10 小時**。高薪但有過勞風險。預估月收入 $${getEstimatedMonthlyIncome(300)}。`,
         val: { pay: 300, hours: 10 }, 
         effect: (p) => {
             p.stableJob = { name: '作業員(做二休二)', pay: 300, hours: 10, desc: '10hr/日(均)' };
@@ -347,7 +355,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '💻 責任制工程師',
         tag: '爆肝',
-        desc: `每日 **12 小時**。極高收入但健康扣損嚴重。預估月收入 $${getEstimatedMonthlyIncome(450, 12)}。`,
+        desc: `每日 **12 小時**。極高收入但健康扣損嚴重。預估月收入 $${getEstimatedMonthlyIncome(450)}。`,
         val: { pay: 450, hours: 12 },
         effect: (p) => {
             p.stableJob = { name: '責任制工程師', pay: 450, hours: 12, desc: '12hr/日' };
@@ -358,7 +366,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '🛒 便利商店店員',
         tag: '低薪',
-        desc: `標準工時 **8 小時**。收入較低，適合保守玩家。預估月收入 $${getEstimatedMonthlyIncome(150, 8)}。`,
+        desc: `標準工時 **8 小時**。收入較低，適合保守玩家。預估月收入 $${getEstimatedMonthlyIncome(150)}。`,
         val: { pay: 150, hours: 8 }, 
         effect: (p) => {
             p.stableJob = { name: '便利商店店員', pay: 150, hours: 8, desc: '8hr/日' };
@@ -369,7 +377,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '👨‍🏫 補習班老師',
         tag: '中薪',
-        desc: `每日 **9 小時**。略微超時，中等收入。預估月收入 $${getEstimatedMonthlyIncome(250, 9)}。`,
+        desc: `每日 **9 小時**。略微超時，中等收入。預估月收入 $${getEstimatedMonthlyIncome(250)}。`,
         val: { pay: 250, hours: 9 },
         effect: (p) => {
             p.stableJob = { name: '補習班老師', pay: 250, hours: 9, desc: '9hr/日' };
@@ -511,8 +519,8 @@ function generateCards(playerIdx) {
     
     // 洗牌抽 5 張
     let deck = [];
+    // T1 固定從 5 種工作 generator 中抽
     if (gameState.turn === 1) {
-        // 首輪只從 5 個穩定工作 generator 中抽
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -536,10 +544,8 @@ function renderCards() {
     
     gameState.currentCards.forEach((card, idx) => {
         let div = document.createElement('div');
-        // 移除 selected 樣式
         div.className = `card`; 
         
-        // Tag Color logic
         let tagClass = 'tag-none';
         if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
         else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
@@ -610,7 +616,6 @@ function processTurn() {
             inv.turnsLeft--;
             if (inv.turnsLeft === 0) {
                 let roll = Math.random() * 100; 
-                let resultAmt = 0;
                 let volatility = inv.risk * 1.5; 
                 
                 if (roll < (inv.risk / 2.5)) {
@@ -619,7 +624,7 @@ function processTurn() {
                     if (inv.risk > 80 && Math.random() < 0.2) lossRate = 150; // 爆倉負債
                     
                     let returnVal = Math.floor(inv.cost * (100 - lossRate) / 100);
-                    resultAmt = returnVal - inv.cost; 
+                    let resultAmt = returnVal - inv.cost; 
                     p.cash += returnVal; 
                     logs.push(`<span class="log-bad">投資失利(R:${inv.risk}) 虧損 $${-resultAmt + inv.cost - returnVal}</span>`);
                 } else {
@@ -630,9 +635,9 @@ function processTurn() {
                     logs.push(`<span class="log-good">投資獲利(R:${inv.risk}) +$${totalBack - inv.cost}</span>`);
                     p.roundIncome += (totalBack - inv.cost);
                 }
-                return false; // 移除已結算投資
+                return false; 
             }
-            return true; // 保留未結算投資
+            return true; 
         });
 
         // 5. 強制支出 (十一 + 生活費)
