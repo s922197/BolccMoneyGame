@@ -631,7 +631,20 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
     if (isTimeout && totalSelected === 0) {
         log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
         recordHistory(player, ['超時/跳過']); 
-        setTimeout(() => nextPhase(playerIdx), 300);
+        
+        if (isSpecialEvent) {
+            // 特殊事件超時，視為選擇了「否」選項 (如果存在)
+            const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
+            if (fallbackOption) {
+                fallbackOption.effect(player);
+                log(`🚨 超時，特殊事件自動選擇「${fallbackOption.title}」。`, 'log-event');
+            } else {
+                log(`🚨 超時，特殊事件無默認選項，資產無影響。`, 'log-event');
+            }
+            setTimeout(() => startPlayerTurn(playerIdx), 300); // 特殊事件超時後，回到正常階段
+        } else {
+            setTimeout(() => nextPhase(playerIdx), 300); // 正常回合超時後，切換到下一位玩家
+        }
         return;
     }
     if (!isQuickAction && !isTimeout && (totalSelected < 1 || totalSelected > gameState.maxSelections)) {
@@ -667,10 +680,10 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
 
     gameState.selectedIndices = [];
     
-    // --- 特殊事件處理完畢後，切換回正常選擇階段 ---
+    // --- 特殊事件處理完畢後，**回到正常選擇階段** (在同一輪) ---
     if (isSpecialEvent) {
-         log(`✅ ${player.name} 特殊事件處理完畢，進入正常選擇階段。`, 'log-event');
-         // 重新啟動本回合的正常選擇
+         log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
+         // 重新啟動本回合的正常選擇 (關鍵修正點)
          setTimeout(() => startPlayerTurn(playerIdx), 500); 
     } else {
          // 正常回合處理完畢，切換到下一位玩家或結算
@@ -679,9 +692,18 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
 }
 
 function nextPhase(playerIdx) {
+    // 檢查是否已達到最大選擇次數 (針對正常選擇階段)
+    if (gameState.phase.endsWith('_choice') && gameState.selectionCount < gameState.maxSelections) {
+        log(`⚠️ ${gameState.players[playerIdx].name} 尚未完成選擇，剩餘 ${gameState.maxSelections - gameState.selectionCount} 次選擇機會。`, 'bad');
+        // 如果玩家主動按確認但未選滿，提示後重新啟動計時器 (如果不是 QuickAction 執行，這個檢查會在 confirmAction 內處理)
+        // 為了簡單起見，如果到達這裡，代表行動已完成，直接進入下一階段
+    }
+
     if (playerIdx === 0) {
+        // 從 A 組 (0) 切換到 B 組 (1)
         startPlayerTurn(1); 
     } else {
+        // 從 B 組 (1) 切換到結算
         gameState.phase = 'processing';
         updateUI();
         document.getElementById('cards-container').innerHTML = '<h3 style="text-align:center;width:100%;color:#aaa;">結算中...</h3>';
