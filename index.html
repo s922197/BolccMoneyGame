@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.2 (UI優化版)</title>
+    <title>社畜生存戰：理財 Roguelike v2.3 (最終UI對齊版)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -29,21 +29,23 @@
             width: 100%;
         }
         
-        /* 儀表板 - 強制單行顯示，優化捲軸問題 */
+        /* 儀表板 - 強制對齊和等寬 */
         .dashboard {
             display: flex;
             justify-content: space-between;
             gap: 10px;
             margin-bottom: 15px;
-            /* 移除 overflow-x: auto; 依賴 player-stats 的 min-width 確保不換行 */
         }
         .player-stats {
             background: var(--card-bg);
-            padding: 8px 12px; /* 縮小內距 */
+            padding: 8px 12px; 
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            flex: 0 0 49%; 
-            min-width: 350px; 
+            
+            /* 核心對齊和等寬設置 */
+            flex-basis: 0;
+            flex-grow: 1; 
+            
             border-top: 5px solid #bdc3c7;
             transition: all 0.3s;
             position: relative;
@@ -58,8 +60,8 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
-            margin: 3px 0; /* 縮小間距 */
-            font-size: 0.85em; /* 略微縮小字體 */
+            margin: 3px 0; 
+            font-size: 0.85em; 
             align-items: center;
         }
         .money { color: var(--accent); font-weight: bold; font-family: monospace; font-size: 1em; }
@@ -139,11 +141,11 @@
             background: #fff;
             padding: 15px;
             border-radius: 8px;
-            height: 150px; /* 增加高度 */
+            height: 150px; 
             overflow-y: auto;
             border: 1px solid #ddd;
             font-family: monospace;
-            font-size: 1em; /* 調整為更顯眼的字體大小 */
+            font-size: 1em; 
         }
         .log-entry { margin-bottom: 5px; border-bottom: 1px dashed #eee; padding-bottom: 2px; }
         .log-turn { color: #fff; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
