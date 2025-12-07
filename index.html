@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.3 (特殊事件)</title>
+    <title>社畜生存戰：理財 Roguelike v5.4 (最終特殊事件修正)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -426,7 +426,7 @@ function startGame() {
     startPlayerTurn(0);
 }
 
-// --- 計時器功能 (略) ---
+// --- 計時器功能 ---
 function getTimeLimit(turn) {
     // 特殊事件強制 40 秒
     if (CONFIG.specialEventTurns.includes(turn)) return 40; 
@@ -480,18 +480,18 @@ function startPlayerTurn(playerIdx) {
     const playerPrefix = playerIdx === 0 ? 'p1' : 'p2';
     const player = gameState.players[playerIdx];
 
-    // 1. 檢查是否需要觸發特殊事件
-    // 只有在進入新的一輪 (turn) 時，且前一階段不是特殊事件處理完畢時，才檢查特殊事件
+    // 檢查是否需要觸發特殊事件 (只在 A 組開始新的一輪時檢查)
     const isNewTurnStart = playerIdx === 0;
     const isSpecialEventTriggered = CONFIG.specialEventTurns.includes(gameState.turn) && isNewTurnStart;
     
-    if (isSpecialEventTriggered && !gameState.phase.endsWith('_choice')) {
+    // 如果流程不在 _event 階段 (可能是從 processing 進入，或從 B 組跳轉過來)
+    if (isSpecialEventTriggered && gameState.phase.startsWith(playerPrefix) && !gameState.phase.endsWith('_choice')) {
         gameState.phase = `${playerPrefix}_event`;
         gameState.maxSelections = 1; // 特殊事件只能選 1 張
         generateSpecialEventCards(gameState.turn);
         log(`📢 ${player.name} 進入特殊事件階段！ (T${gameState.turn})`, 'log-event');
     } else {
-        // 2. 正常回合
+        // 正常回合 (包括特殊事件處理完畢後的回歸)
         gameState.phase = `${playerPrefix}_choice`;
         if (gameState.turn === 1) {
             gameState.maxSelections = 1; 
@@ -560,7 +560,7 @@ function handleCardClick(index) {
         let input = prompt("請輸入存款比例：20 (20%) / 50 (50%) / ALL (全部)");
         
         document.querySelectorAll('.card').forEach(c => c.classList.remove('disabled'));
-        renderCards(); 
+        renderCards(false); // 重新渲染確保 UI 狀態正確
         startTimer(gameState.timeLeft); 
 
         if (input) {
@@ -638,6 +638,7 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
     if (isTimeout && totalSelected === 0) {
         // 特殊事件超時處理
         if (isSpecialEvent) {
+             // 超時嘗試選擇「婉拒/拒絕」選項作為默認
              const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
             if (fallbackOption) {
                 fallbackOption.effect(player);
@@ -648,8 +649,11 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
                 selectedCardNames.push('特殊事件超時/跳過');
             }
              recordHistory(player, selectedCardNames);
+             
              // 特殊事件超時，回到正常階段
              log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
+             // 設置為 choice，並重新啟動本回合的選擇
+             gameState.phase = `${playerIdx === 0 ? 'p1' : 'p2'}_choice`;
              setTimeout(() => startPlayerTurn(playerIdx), 500); 
              return;
         } else {
@@ -744,7 +748,7 @@ function getDynamicPay(basePay) {
     return Math.floor(basePay * increaseFactor / 10) * 10;
 }
 function getCardCost(card) {
-    // 特殊事件的成本現在儲存在 card.loss 屬性中
+    // 特殊事件的成本 now 儲存在 card.loss 屬性中
     if (card.loss !== undefined) return 0; // 避免在 UI 上顯示詐騙成本
     
     switch(card.title) {
@@ -972,8 +976,8 @@ const generators = {
             case 5:
                 return [
                     {
-                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000, // 實際損失儲存在 loss 屬性
-                        desc: '有一個人透過FB私訊你說有高薪國外機會，你有沒有興趣? (損失 $1000 並降低健康)',
+                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000, 
+                        desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (結果將導致資產和健康損失)',
                         effect: (p) => {
                             const loss = 1000;
                             const actualLoss = applyLoss(p, loss);
@@ -994,7 +998,7 @@ const generators = {
                 return [
                     {
                         title: '✅ 加入飆股群組', tag: '假投資陷阱', loss: 2000,
-                        desc: '有人在LINE發訊息說張忠謀開課教你如何投資股票，帶你飆股，有沒有興趣加入群組? (損失 $2000)',
+                        desc: '有人在LINE發訊息說張忠謀開課教你投資股票，你是否願意投入資金？ (結果將導致資產損失)',
                         effect: (p) => {
                             const loss = 2000;
                             const actualLoss = applyLoss(p, loss);
@@ -1014,14 +1018,14 @@ const generators = {
                 return [
                     {
                         title: '✅ 選擇強硬拒絕', tag: '明智抉擇', loss: 0,
-                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (強硬拒絕)',
+                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (強硬拒絕，無損失)',
                         effect: (p) => {
                             return `👍 成功逃離！資產無影響。`;
                         }
                     },
                      {
                         title: '❌ 被迫購買全套產品', tag: '強迫推銷', loss: 5000,
-                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (損失 $5000)',
+                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (結果將導致資產損失)',
                         effect: (p) => {
                             const loss = 5000;
                             const actualLoss = applyLoss(p, loss);
@@ -1047,7 +1051,7 @@ function generateCards(playerIdx) {
     let pool = [];
     const player = gameState.players[playerIdx];
 
-    // T1 特殊處理 (略)
+    // T1 特殊處理 (選工作)
     if (gameState.turn === 1) {
         const t1Jobs = [
             generators.jobStableStandard, generators.jobStableShift,
@@ -1148,12 +1152,12 @@ function renderCards(isSpecialEvent) {
         const cost = card.cost || getCardCost(card); // 正常卡片成本
 
         if (isSpecialEvent) {
-            // 特殊事件，不顯示成本，不檢查資產
+            // 特殊事件，不顯示成本，**不檢查資產**
             tagClass = card.tag.includes('明智') ? 'tag-risk-low' : 'tag-special-danger';
             clickText = `選擇 (結果將直接影響資產)`;
-            // isDisabled 保持為 false
+            // isDisabled 保持為 false (關鍵：允許玩家選擇導致負資產的選項)
         } else {
-            // 正常回合的標籤和禁用邏輯 (略)
+            // 正常回合的標籤和禁用邏輯
             if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
             else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
             else tagClass = 'tag-special';
@@ -1220,7 +1224,7 @@ function renderCards(isSpecialEvent) {
 }
 
 
-// --- 結算核心 (略) ---
+// --- 結算核心 ---
 function processTurn() {
     log(`--- 第 ${gameState.turn} 輪結算 ---`, 'turn');
     
@@ -1231,7 +1235,7 @@ function processTurn() {
         p.roundIncome = 0;
         let jobIncome = 0; 
         
-        // --- 1. 計算工時與健康 (略) ---
+        // --- 1. 計算工時與健康 ---
         let dailyHours = 0;
         if (p.stableJob) dailyHours += p.stableJob.hours;
         p.partTimeJobs.forEach(j => dailyHours += j.hours);
@@ -1243,7 +1247,7 @@ function processTurn() {
             logs.push(`<span class="log-bad">過勞(${dailyHours}hr) 健康 -${dmg.toFixed(1)}</span>`);
         }
         
-        // --- 2. 疾病判定 (略) ---
+        // --- 2. 疾病判定 ---
         if (p.hp < CONFIG.maxHp && p.sicknessCost === 0) {
             let sickChance = (100 - p.hp) * 0.7 / 100;
             if (Math.random() < sickChance) {
@@ -1258,7 +1262,7 @@ function processTurn() {
         }
 
 
-        // --- 3. 收入結算 (略) ---
+        // --- 3. 收入結算 ---
         if (p.stableJob) {
             p.roundIncome += p.stableJob.pay;
             p.cash += p.stableJob.pay;
@@ -1277,7 +1281,7 @@ function processTurn() {
              logs.push(`<span class="log-good">工作收入 +$${jobIncome}</span>`);
         }
         
-        // --- 4. 股票股利收入 (略) ---
+        // --- 4. 股票股利收入 ---
         let dividendIncome = 0;
         p.stocks.forEach(s => {
             let baseDiv = Math.floor(s.cost / 100);
@@ -1290,7 +1294,7 @@ function processTurn() {
              logs.push(`<span class="log-good">💸 股利收入 +$${dividendIncome}</span>`);
         }
 
-        // --- 5. 投資結算 (短期風險) (略) ---
+        // --- 5. 投資結算 (短期風險) ---
         p.investments = p.investments.filter(inv => {
             inv.turnsLeft--;
             if (inv.turnsLeft === 0) {
@@ -1317,7 +1321,7 @@ function processTurn() {
             return true; 
         });
         
-        // --- 6. 定存結算 (略) ---
+        // --- 6. 定存結算 ---
         p.lockedSavings = p.lockedSavings.filter(locked => {
             locked.turnsLeft--;
             if (locked.turnsLeft === 0) {
@@ -1332,20 +1336,21 @@ function processTurn() {
         });
 
 
-        // --- 7. 強制支出 (生活費 + 十一) (略) ---
+        // --- 7. 強制支出 (生活費 + 十一) ---
         let totalObligation = CONFIG.livingCost;
         if (p.roundIncome > 0) {
             totalObligation += Math.floor(p.roundIncome * CONFIG.titheRate);
         }
         
-        let actualPayment = Math.min(totalObligation, p.cash + p.bank);
+        let actualPayment = totalObligation; // 總欠款額度
 
+        // 優先扣除現金
         if (p.cash >= actualPayment) {
             p.cash -= actualPayment;
         } else {
             let shortage = actualPayment - p.cash;
             p.cash = 0;
-            p.bank -= shortage;
+            p.bank -= shortage; // 不足的從存款中扣除，允許負債
         }
 
         logs.push(`生活費 + 奉獻 -$${totalObligation}`);
@@ -1370,7 +1375,7 @@ function processTurn() {
             }
         }
         
-        // --- 9. 破產/負債處理 (已在特殊事件中處理，此處確保 cash/bank UI 顯示正確) ---
+        // --- 9. 破產/負債處理 (確保 cash/bank UI 顯示正確) ---
         if (p.hp < 0) p.hp = 0;
         if (p.hp > CONFIG.maxHp) p.hp = CONFIG.maxHp;
 
@@ -1409,7 +1414,7 @@ function handleGlobalEvents() {
     }
 }
 
-// --- 輔助函式 (略) ---
+// --- 輔助函式 ---
 function updateUI() {
     document.getElementById('turn-display').innerText = `第 ${gameState.turn} / ${CONFIG.maxTurns} 輪`;
     
@@ -1567,6 +1572,8 @@ function log(msg, type='') {
     else if (type === 'log-event') div.innerHTML = `<span class="log-event">${msg}</span>`;
     else div.innerHTML = msg;
     area.prepend(div);
+    // 確保日誌視圖滾動到頂部以顯示最新消息
+    area.scrollTop = 0;
 }
 </script>
 </body>
