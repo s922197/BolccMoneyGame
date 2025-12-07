@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.5 (正常卡牌扣款修正)</title>
+    <title>社畜生存戰：理財 Roguelike v5.7 (隨機事件強化)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -167,17 +167,14 @@
             flex-shrink: 1;
             min-width: 0; /* 允許縮小 */
         }
-        /* 特殊事件卡牌樣式 */
-        .card.special-event {
+        /* 特殊：高風險/詐騙卡牌樣式 */
+        .card.scam {
             border: 4px solid var(--danger);
             background: #fffafa;
-            flex-basis: 45%; 
-            flex-grow: 0;
-            min-height: 220px;
-            box-shadow: 0 0 15px rgba(231, 76, 60, 0.4);
+            box-shadow: 0 0 10px rgba(231, 76, 60, 0.4);
         }
-        .card.special-event .card-title { color: var(--danger); font-size: 1.6em; }
-        .card.special-event .card-desc { font-size: 1.1em; color: var(--primary); }
+        .card.scam .card-title { color: var(--danger); }
+
 
         .card:hover { transform: translateY(-3px); border-color: #bdc3c7; }
         
@@ -187,7 +184,7 @@
             box-shadow: 0 0 10px rgba(39, 174, 96, 0.7);
             transform: translateY(-5px);
         }
-        .card.special-event.selected {
+        .card.scam.selected {
             border-color: var(--accent);
             box-shadow: 0 0 10px rgba(39, 174, 96, 0.7);
         }
@@ -236,8 +233,8 @@
         .tag-risk-low { background: #27ae60; }
         .tag-risk-mid { background: #f39c12; }
         .tag-risk-high { background: #c0392b; }
-        .tag-none { background: #95a5a6; }
-        .tag-special { background: #8e44ad; }
+        .tag-scam { background: #8e44ad; }
+        .tag-special { background: #95a5a6; }
         .tag-special-danger { background: var(--danger); }
 
         /* 事件日誌優化 */
@@ -256,7 +253,7 @@
         .log-turn { color: #fff; background: #e67e22; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         .log-bad { color: #c0392b; font-weight: bold; }
         .log-good { color: #27ae60; font-weight: bold; }
-        .log-event { color: #8e44ad; font-weight: bold; } /* 新增特殊事件log顏色 */
+        .log-scam { color: #8e44ad; font-weight: bold; } /* 詐騙log顏色 */
 
 
         /* 狀態文字小字 */
@@ -273,7 +270,7 @@
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>⏱️ **時間限制：** 隨著遊戲進展，決策時間將逐漸縮短！</p>
-            <p>🚨 **特殊事件：** 第 5, 12, 18 輪會出現單獨的**詐騙/推銷**事件！</p>
+            <p>🚨 **高風險卡片：** 隨機出現**詐騙/高風險投資**卡片！</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -364,8 +361,8 @@ const CONFIG = {
     lowHpThreshold: 30, 
     minSickCost: 50, 
     turnSalaryIncrease: 0.02,
-    // --- 特殊事件輪數 ---
-    specialEventTurns: [5, 12, 18],
+    // --- 移除特殊事件輪數 ---
+    // specialEventTurns: [5, 12, 18],
     // --- 時間限制配置 ---
     timeLimits: [
         { endTurn: 5, time: 60 }, 
@@ -377,7 +374,7 @@ const CONFIG = {
 
 let gameState = {
     turn: 1,
-    phase: 'p1_choice', // p1_choice, p2_choice, p1_event, p2_event, processing
+    phase: 'p1_choice', // p1_choice, p2_choice, processing
     players: [],
     currentCards: [],
     selectedIndices: [], 
@@ -428,9 +425,7 @@ function startGame() {
 
 // --- 計時器功能 ---
 function getTimeLimit(turn) {
-    // 特殊事件強制 40 秒
-    if (CONFIG.specialEventTurns.includes(turn)) return 40; 
-    
+    // 移除特殊事件的固定時間
     for (const limit of CONFIG.timeLimits) {
         if (turn <= limit.endTurn) {
             return limit.time;
@@ -480,32 +475,17 @@ function startPlayerTurn(playerIdx) {
     const playerPrefix = playerIdx === 0 ? 'p1' : 'p2';
     const player = gameState.players[playerIdx];
 
-    // 檢查是否需要觸發特殊事件 (只在 A 組開始新的一輪時檢查)
-    const isNewTurnStart = playerIdx === 0;
-    const isSpecialEventTriggered = CONFIG.specialEventTurns.includes(gameState.turn) && isNewTurnStart;
-    
-    // 如果流程不在 _event 階段 (可能是從 processing 進入，或從 B 組跳轉過來)
-    if (isSpecialEventTriggered && gameState.phase.startsWith(playerPrefix) && !gameState.phase.endsWith('_choice')) {
-        gameState.phase = `${playerPrefix}_event`;
-        gameState.maxSelections = 1; // 特殊事件只能選 1 張
-        generateSpecialEventCards(gameState.turn);
-        log(`📢 ${player.name} 進入特殊事件階段！ (T${gameState.turn})`, 'log-event');
+    // 正常回合
+    gameState.phase = `${playerPrefix}_choice`;
+    if (gameState.turn === 1) {
+        gameState.maxSelections = 1; 
     } else {
-        // 正常回合 (包括特殊事件處理完畢後的回歸)
-        gameState.phase = `${playerPrefix}_choice`;
-        if (gameState.turn === 1) {
-            gameState.maxSelections = 1; 
-        } else {
-            gameState.maxSelections = 2; 
-        }
-        generateCards(playerIdx);
+        gameState.maxSelections = 2; 
     }
+    generateCards(playerIdx);
     
     gameState.selectedIndices = []; 
-    // 重置已完成的 Quick Actions 數量 (如存款)
-    if (gameState.phase.endsWith('_choice')) {
-         gameState.selectionCount = 0; 
-    }
+    gameState.selectionCount = 0; 
     
     updateUI();
     
@@ -525,16 +505,6 @@ function handleCardClick(index) {
     const card = gameState.currentCards[index];
     const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
-
-    // --- 特殊事件模式下只能選 1 張 ---
-    if (gameState.phase.endsWith('_event')) {
-         gameState.selectedIndices = [index];
-         document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
-         cardElement.classList.add('selected');
-         btn.disabled = false;
-         btn.innerText = `確認行動 (已選 1 / 1)`;
-         return;
-    }
 
     // --- 正常行動模式下的邏輯 (疾病強制選擇, 存款特殊處理, 正常選擇邏輯) ---
     // 1. 疾病強制選擇檢查 
@@ -622,48 +592,24 @@ function handleCardClick(index) {
 }
 
 /**
- * 確認行動 (包括特殊事件)
+ * 確認行動 (包括超時)
  */
 function confirmAction(isQuickAction = false, isTimeout = false) {
     stopTimer(); 
 
     const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
-    const isSpecialEvent = gameState.phase.endsWith('_event');
 
     const totalSelected = gameState.selectionCount + gameState.selectedIndices.length;
     let selectedCardNames = [];
     
     // --- 超時或選擇數量檢查 ---
     if (isTimeout && totalSelected === 0) {
-        // 特殊事件超時處理
-        if (isSpecialEvent) {
-             // 超時嘗試選擇「婉拒/拒絕」選項作為默認
-             const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
-            if (fallbackOption) {
-                // 特殊事件，不檢查資產，直接執行效果
-                fallbackOption.effect(player);
-                selectedCardNames.push(fallbackOption.title);
-                log(`🚨 超時，特殊事件自動選擇「${fallbackOption.title}」。`, 'log-event');
-            } else {
-                log(`🚨 超時，特殊事件無默認選項，資產無影響。`, 'log-event');
-                selectedCardNames.push('特殊事件超時/跳過');
-            }
-             recordHistory(player, selectedCardNames);
-             
-             // 特殊事件超時，回到正常階段
-             log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
-             // 設置為 choice，並重新啟動本回合的選擇
-             gameState.phase = `${playerIdx === 0 ? 'p1' : 'p2'}_choice`;
-             setTimeout(() => startPlayerTurn(playerIdx), 500); 
-             return;
-        } else {
-             // 正常回合超時處理
-             log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
-             recordHistory(player, ['超時/跳過']); 
-             setTimeout(() => nextPhase(playerIdx), 500); // 正常回合超時後，切換到下一位玩家
-             return;
-        }
+        // 正常回合超時處理
+        log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
+        recordHistory(player, ['超時/跳過']); 
+        setTimeout(() => nextPhase(playerIdx), 500); 
+        return;
     }
 
     if (!isQuickAction && !isTimeout && (totalSelected < 1 || totalSelected > gameState.maxSelections)) {
@@ -699,16 +645,8 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
 
     gameState.selectedIndices = [];
     
-    // --- 特殊事件處理完畢後，**回到正常選擇階段** (在同一輪) ---
-    if (isSpecialEvent) {
-         log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
-         // 設置為 choice，並重新啟動本回合的選擇 (關鍵修正點)
-         gameState.phase = `${playerIdx === 0 ? 'p1' : 'p2'}_choice`;
-         setTimeout(() => startPlayerTurn(playerIdx), 500); 
-    } else {
-         // 正常回合處理完畢，切換到下一位玩家或結算
-         setTimeout(() => nextPhase(playerIdx), 500);
-    }
+    // 正常回合處理完畢，切換到下一位玩家或結算
+    setTimeout(() => nextPhase(playerIdx), 500);
 }
 
 function nextPhase(playerIdx) {
@@ -744,6 +682,7 @@ function recordHistory(player, actions) {
 
 /**
  * 核心扣款函數：優先扣除現金，現金不足則扣除存款
+ * 適用於**正常卡片成本**，確保資產總額不會在行動階段變負。
  * @param {object} p - 玩家對象
  * @param {number} cost - 需支付的成本
  * @returns {string} 扣款結果描述
@@ -766,23 +705,42 @@ function applyPayment(p, cost) {
             return `成功支付 $${actualCost} (現金+存款支付$${bankDeduction})`;
         } else {
             // 正常回合卡片不允許資產總額（現金+存款）變為負數
-            // 實際上這段邏輯在 renderCards 中已經防止，這裡僅作為最終保險
-            // 如果走到這裡，說明資產總額不足，但由於 renderCards 已禁用，所以這通常不會發生。
             return '資產總額不足，交易取消 (應已在UI禁用)';
         }
     }
 }
 
+/**
+ * 核心損失函數：優先扣除現金，現金不足則扣除存款
+ * 適用於**強制損失或詐騙事件**，**允許存款變為負債**。
+ * @param {object} p - 玩家對象
+ * @param {number} loss - 需支付的損失額度
+ * @returns {number} 實際損失額度
+ */
+function applyLoss(p, loss) {
+    let actualLoss = loss;
+    
+    if (p.cash >= actualLoss) {
+        p.cash -= actualLoss;
+    } else {
+        let shortage = actualLoss - p.cash;
+        p.cash = 0;
+        // 不檢查存款是否足夠，允許存款為負 (即產生債務)
+        p.bank -= shortage;
+    }
+    return actualLoss;
+}
 
-// --- 卡牌生成器 (新增特殊事件) ---
+
+// --- 卡牌生成器 (新增詐騙事件) ---
 function getDynamicPay(basePay) {
     if (gameState.turn === 1) return basePay;
     const increaseFactor = 1 + (gameState.turn - 1) * CONFIG.turnSalaryIncrease;
     return Math.floor(basePay * increaseFactor / 10) * 10;
 }
 function getCardCost(card) {
-    // 特殊事件的成本 now 儲存在 card.loss 屬性中
-    if (card.loss !== undefined) return 0; // 避免在 UI 上顯示詐騙成本
+    // 詐騙卡的成本 now 儲存在 card.scamCost 屬性中，不讓 UI 顯示成本
+    if (card.scamCost !== undefined) return 0; 
     
     // 如果卡片本身已經定義了 cost，則使用它
     if (card.cost !== undefined && card.cost > 0) return card.cost;
@@ -1004,96 +962,37 @@ const generators = {
         };
     },
     
-    // --- 特殊事件卡牌產生器 ---
-    specialEventCard: (type) => {
-        // 特殊事件的資產扣除邏輯：只檢查現金，不足則從存款扣除，**允許存款變為負債**
-        const applyLoss = (p, loss) => {
-            let actualLoss = loss;
-            
-            if (p.cash >= actualLoss) {
-                p.cash -= actualLoss;
-            } else {
-                let shortage = actualLoss - p.cash;
-                p.cash = 0;
-                // 不檢查存款是否足夠，允許存款為負 (即產生債務)
-                p.bank -= shortage;
-            }
-            return actualLoss;
-        };
-
-        switch(type) {
-            case 5:
-                return [
-                    {
-                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000, 
-                        desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (結果將導致資產和健康損失)',
-                        effect: (p) => {
-                            const loss = 1000;
-                            const actualLoss = applyLoss(p, loss);
-                            p.hp = Math.max(0, p.hp - 10);
-                            
-                            return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區，家裡花錢撈人。)`;
-                        }
-                    },
-                    {
-                        title: '❌ 婉拒並封鎖訊息', tag: '明智抉擇', loss: 0,
-                        desc: '恭喜你在電視上看到有人被騙，慶幸自己逃過一劫。',
-                        effect: (p) => {
-                            return `👍 逃過一劫！資產無影響。`;
-                        }
-                    }
-                ];
-            case 12:
-                return [
-                    {
-                        title: '✅ 加入飆股群組', tag: '假投資陷阱', loss: 2000,
-                        desc: '有人在LINE發訊息說張忠謀開課教你投資股票，你是否願意投入資金？ (結果將導致資產損失)',
-                        effect: (p) => {
-                            const loss = 2000;
-                            const actualLoss = applyLoss(p, loss);
-
-                            return `💣 假投資平台！儲進去的 $${actualLoss} 直接歸零。`;
-                        }
-                    },
-                    {
-                        title: '❌ 不理會，退出群組', tag: '明智抉擇', loss: 0,
-                        desc: '還好沒被騙，嚇死寶寶了。',
-                        effect: (p) => {
-                            return `👍 逃過一劫！資產無影響。`;
-                        }
-                    }
-                ];
-            case 18:
-                return [
-                    {
-                        title: '✅ 選擇強硬拒絕', tag: '明智抉擇', loss: 0,
-                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (強硬拒絕，無損失)',
-                        effect: (p) => {
-                            return `👍 成功逃離！資產無影響。`;
-                        }
-                    },
-                     {
-                        title: '❌ 被迫購買全套產品', tag: '強迫推銷', loss: 5000,
-                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (結果將導致資產損失)',
-                        effect: (p) => {
-                            const loss = 5000;
-                            const actualLoss = applyLoss(p, loss);
-                            
-                            return `💸 逃不出推銷！花 $${actualLoss} 買了一整套沒用化妝品。`;
-                        }
-                    }
-                ];
-            default:
-                return [];
+    // --- 新增：詐騙/高風險卡片生成器 ---
+    scamCrypto: () => ({
+        title: '💥 飆升幣投資', tag: '詐騙陷阱', scamCost: 2000, 
+        desc: '加入 LINE 群組，號稱投資虛擬貨幣一週翻倍，誘惑你投入大額資金。 (強制損失 $2000)',
+        effect: (p) => {
+            const loss = 2000;
+            const actualLoss = applyLoss(p, loss);
+            p.hp = Math.max(0, p.hp - 5);
+            return `💣 假投資平台！投入的 $${actualLoss} 歸零。健康 -5。`;
         }
-    }
+    }),
+    scamSocial: () => ({
+        title: '❌ 國外高薪機會', tag: '詐騙陷阱', scamCost: 1000, 
+        desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (強制損失 $1000)',
+        effect: (p) => {
+            const loss = 1000;
+            const actualLoss = applyLoss(p, loss);
+            p.hp = Math.max(0, p.hp - 10);
+            return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區)。`;
+        }
+    }),
+    scamInsurance: () => ({
+        title: '💸 高報酬保單', tag: '強迫推銷', scamCost: 5000, 
+        desc: '親戚推銷高報酬保單，強調儲蓄功能。你是否購買？ (強制損失 $5000)',
+        effect: (p) => {
+            const loss = 5000;
+            const actualLoss = applyLoss(p, loss);
+            return `💸 被強迫推銷！損失 $${actualLoss} 買了一整套超貴保單。`;
+        }
+    }),
 };
-
-function generateSpecialEventCards(turn) {
-    const cards = generators.specialEventCard(turn);
-    gameState.currentCards = cards;
-    renderCards(true);
-}
 
 
 function generateCards(playerIdx) {
@@ -1122,6 +1021,7 @@ function generateCards(playerIdx) {
             ...(gameState.turn <= CONFIG.maxTurns - 5 ? [generators.jobStableOvertime] : []) 
         ];
 
+        // 正常卡池：加入詐騙卡
         pool = [
             ...jobPool,
             generators.jobPartTime, generators.jobPartTime,
@@ -1129,6 +1029,7 @@ function generateCards(playerIdx) {
             generators.depositFlexible, generators.rateBoostLong, generators.depositFixed,
             generators.invest, generators.invest, generators.invest,
             generators.investStock,
+            generators.scamCrypto, generators.scamSocial, generators.scamInsurance, // 詐騙卡片
             () => generators.rest(player), () => generators.rest(player)
         ]; 
 
@@ -1175,41 +1076,37 @@ function renderCards(isSpecialEvent) {
     const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
     const totalLiquidAssets = player.cash + player.bank;
-    const isForceHealing = player.hp <= CONFIG.lowHpThreshold && !isSpecialEvent; // 特殊事件期間不檢查強制治療
+    const isForceHealing = player.hp <= CONFIG.lowHpThreshold && !isSpecialEvent; 
 
-    // 調整卡片容器佈局以適應特殊事件
-    if (isSpecialEvent) {
-        container.style.justifyContent = 'space-around';
-        container.style.flexWrap = 'nowrap';
-        container.style.maxWidth = '800px'; 
-    } else {
-        container.style.justifyContent = 'space-between';
-        container.style.flexWrap = 'wrap';
-        container.style.maxWidth = 'none'; 
-    }
+    // 正常回合渲染
+    container.style.justifyContent = 'space-between';
+    container.style.flexWrap = 'wrap';
+    container.style.maxWidth = 'none'; 
 
 
     gameState.currentCards.forEach((card, idx) => {
         let div = document.createElement('div');
-        div.className = `card ${isSpecialEvent ? 'special-event' : ''}`; 
+        let isScam = card.scamCost !== undefined; // 判斷是否為詐騙卡
+
+        div.className = `card ${isScam ? 'scam' : ''}`; 
         div.id = `card-${idx}`; 
         
         let tagClass = 'tag-none';
         let clickText = '點擊選擇';
         let isDisabled = false;
         let disableReason = '';
-        const cost = card.cost || getCardCost(card); // 正常卡片成本
+        const cost = getCardCost(card); // 正常卡片成本 (詐騙卡 cost=0)
 
-        if (isSpecialEvent) {
-            // 特殊事件，不顯示成本，**不檢查資產**
-            tagClass = card.tag.includes('明智') ? 'tag-risk-low' : 'tag-special-danger';
-            clickText = `選擇 (結果將直接影響資產)`;
-            // isDisabled 保持為 false (關鍵：允許玩家選擇導致負資產的選項)
+        // 標籤和禁用邏輯
+        if (isScam) {
+            tagClass = 'tag-scam';
+            clickText = `選擇 (強制損失 $${card.scamCost})`;
+            // 詐騙卡允許選擇，不檢查資產
         } else {
-            // 正常回合的標籤和禁用邏輯
             if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
             else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
-            else tagClass = 'tag-special';
+            else if (card.tag.includes('特殊')) tagClass = 'tag-special';
+            else tagClass = 'tag-risk-low'; // 其他一般理財卡
 
             clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
 
@@ -1264,13 +1161,6 @@ function renderCards(isSpecialEvent) {
         document.getElementById('confirm-btn').disabled = false;
         document.getElementById('confirm-btn').innerText = `確認行動 (強制治療)`;
     }
-    
-    // 如果是特殊事件，檢查是否有可選項目，並設定按鈕文字
-    if (isSpecialEvent) {
-         // 特殊事件一定可選，不檢查資產
-         document.getElementById('confirm-btn').disabled = false;
-         document.getElementById('confirm-btn').innerText = `確認特殊事件選擇 (只能選 1 張)`;
-    }
 }
 
 
@@ -1278,7 +1168,7 @@ function renderCards(isSpecialEvent) {
 function processTurn() {
     log(`--- 第 ${gameState.turn} 輪結算 ---`, 'turn');
     
-    handleGlobalEvents();
+    handleGlobalEvents(); // 在結算開始時處理隨機事件
 
     gameState.players.forEach(p => {
         let logs = [];
@@ -1440,25 +1330,45 @@ function processTurn() {
     }
 }
 
-
+/**
+ * 隨機結算事件 (強化版本)
+ */
 function handleGlobalEvents() {
-    if (gameState.turn > 5 && Math.random() < 0.3) {
-        const bills = [
-            { t: '💸 收到燃料稅單', amt: 30 },
-            { t: '⚡ 夏季電費帳單', amt: 25 },
-            { t: '🚗 機車強制險續保', amt: 15 },
-            { t: '📱 手機螢幕摔壞', amt: 40 }
+    // 從第 2 輪開始，40% 機率觸發
+    if (gameState.turn > 1 && Math.random() < 0.4) { 
+        const events = [
+            // 負面事件 (amt > 0 為損失)
+            { t: '💸 收到燃料稅單', amt: 30, type: 'bad' },
+            { t: '⚡ 夏季電費帳單', amt: 25, type: 'bad' },
+            { t: '🚗 機車強制險續保', amt: 15, type: 'bad' },
+            { t: '📱 手機螢幕摔壞', amt: 40, type: 'bad' },
+            { t: '🚨 交通罰單', amt: 50, type: 'bad' },
+            // 正面事件 (amt < 0 為收入)
+            { t: '🎁 收到親友禮金', amt: -50, type: 'good' }, 
+            { t: '🍀 意外獲得抽獎金', amt: -80, type: 'good' },
+            { t: '💰 撿到零錢', amt: -20, type: 'good' }
         ];
-        let bill = bills[randInt(0, bills.length-1)];
-        log(`[帳單] ${bill.t} -$${bill.amt}`, 'event');
+        let event = events[randInt(0, events.length-1)];
+        
+        const logType = event.type === 'good' ? 'good' : 'scam'; // 使用 scam log 顏色標記所有強制結算事件
+        const amount = Math.abs(event.amt);
+        
+        log(`[隨機事件] ${event.t} ${event.amt > 0 ? '強制扣款' : '獲得收入'} ${event.amt > 0 ? '-' : '+'}$${amount}`, logType);
+        
         gameState.players.forEach(p => {
-            // 賬單也應允許負資產 (因為屬於強制結算支出)
-            if (p.cash >= bill.amt) {
-                 p.cash -= bill.amt;
-            } else {
-                 let shortage = bill.amt - p.cash;
-                 p.cash = 0;
-                 p.bank -= shortage;
+            let cost = event.amt; 
+            
+            if (cost > 0) { // 帳單/損失
+                 // 優先扣除現金，不足則從存款扣除 (允許負資產)
+                if (p.cash >= cost) {
+                     p.cash -= cost;
+                } else {
+                     let shortage = cost - p.cash;
+                     p.cash = 0;
+                     p.bank -= shortage;
+                }
+            } else { // 收入/增益
+                p.cash += amount; 
             }
         });
     }
@@ -1471,9 +1381,7 @@ function updateUI() {
     let phaseText = '';
     const playerPrefix = gameState.phase.startsWith('p1') ? 'A' : 'B';
     
-    if (gameState.phase.endsWith('_event')) {
-         phaseText = `${playerPrefix} 組 特殊事件 (選 1 張)`;
-    } else if (gameState.phase.endsWith('_choice')) {
+    if (gameState.phase.endsWith('_choice')) {
          phaseText = `${playerPrefix} 組行動 (選 1-${gameState.maxSelections} 張)`;
     } else {
          phaseText = '結算中...';
@@ -1619,7 +1527,8 @@ function log(msg, type='') {
     div.className = 'log-entry';
     if (type === 'turn') div.innerHTML = `<span class="log-turn">${msg}</span>`;
     else if (type === 'bad') div.innerHTML = `<span class="log-bad">${msg}</span>`;
-    else if (type === 'log-event') div.innerHTML = `<span class="log-event">${msg}</span>`;
+    else if (type === 'good') div.innerHTML = `<span class="log-good">${msg}</span>`;
+    else if (type === 'scam') div.innerHTML = `<span class="log-scam">${msg}</span>`; // 使用 scam log 顏色
     else div.innerHTML = msg;
     area.prepend(div);
     // 確保日誌視圖滾動到頂部以顯示最新消息
