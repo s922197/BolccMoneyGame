@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.9 (前期低成本股票與低詐騙率)</title>
+    <title>社畜生存戰：理財 Roguelike v5.9.1 (優化詐騙與扣款邏輯)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -271,7 +271,7 @@
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>⏱️ **時間限制：** 隨著遊戲進展，決策時間將逐漸縮短！</p>
             <p>🚨 **高風險卡片：** 隨機出現**詐騙/高風險投資**卡片！ (金額已隱藏)</p>
-            <p style="color: #c0392b;">**版本更新 v5.9：** 前期股票投資成本降低；詐騙卡出現機率降低。</p>
+            <p style="color: #c0392b;">**版本更新 v5.9.1：** 詐騙卡單輪只能執行一次；扣款統一先扣現金再扣存款；詐騙金額 $1000~$3000 隨機。</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -362,6 +362,7 @@ const CONFIG = {
     lowHpThreshold: 30, 
     minSickCost: 50, 
     turnSalaryIncrease: 0.02,
+    scamLossRange: [1000, 3000], // 新增：詐騙損失範圍
     // --- 時間限制配置 ---
     timeLimits: [
         { endTurn: 5, time: 60 }, 
@@ -484,7 +485,7 @@ function startPlayerTurn(playerIdx) {
     generateCards(playerIdx);
     
     gameState.selectedIndices = []; 
-    gameState.selectionCount = 0; 
+    gameState.selectionCount = 0; // 重置已執行行動計數
     
     updateUI();
     
@@ -505,7 +506,6 @@ function handleCardClick(index) {
     const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
 
-    // --- 正常行動模式下的邏輯 (疾病強制選擇, 存款特殊處理, 正常選擇邏輯) ---
     // 1. 疾病強制選擇檢查 
     if (player.hp <= CONFIG.lowHpThreshold) {
         if (card.title === '🧘 深度休息') {
@@ -528,8 +528,9 @@ function handleCardClick(index) {
 
         let input = prompt("請輸入存款比例：20 (20%) / 50 (50%) / ALL (全部)");
         
+        // 重新啟用卡片
         document.querySelectorAll('.card').forEach(c => c.classList.remove('disabled'));
-        renderCards(false); // 重新渲染確保 UI 狀態正確
+        renderCards(false); 
         startTimer(gameState.timeLeft); 
 
         if (input) {
@@ -562,9 +563,35 @@ function handleCardClick(index) {
         log(`⚠️ ${player.name} 取消或無效的存款選擇。`, 'bad');
         return;
     }
+    
+    // 3. 詐騙卡片特殊處理：立即執行並禁用
+    let isScam = card.scamCost !== undefined;
+    if (isScam) {
+        if (gameState.selectionCount + gameState.selectedIndices.length >= gameState.maxSelections) {
+            log(`⚠️ 詐騙行動不能超過本輪選擇上限！`, 'bad');
+            return;
+        }
+        
+        const result = card.effect(player, card); 
+        log(result, 'scam'); // 顯示損失結果
+        gameState.selectionCount++;
+
+        // 立即禁用此卡片，防止重複點擊
+        cardElement.classList.add('disabled');
+        cardElement.onclick = null;
+        
+        let currentSelected = gameState.selectionCount + gameState.selectedIndices.length;
+        if (currentSelected < gameState.maxSelections) {
+            btn.disabled = false;
+            btn.innerText = `確認行動 (已選 ${currentSelected} / ${gameState.maxSelections})`;
+        } else {
+            confirmAction(true); 
+        }
+        return;
+    }
 
 
-    // 3. 正常選擇邏輯
+    // 4. 正常選擇邏輯
     const idx = gameState.selectedIndices.indexOf(index);
 
     if (idx > -1) {
@@ -632,11 +659,18 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
         gameState.selectionCount++; 
     });
     
-    // 如果是存款立即結算的情況，手動將其加入 actions
-    const isDepositAction = results.some(r => r.includes('[💰 彈性存款]'));
-    if (isDepositAction && !selectedCardNames.includes('💰 彈性存款')) {
+    // 如果是存款/詐騙立即結算的情況，手動將其加入 actions
+    const isQuickActionExecuted = results.some(r => r.includes('[💰 彈性存款]'));
+    const isScamActionExecuted = results.some(r => r.includes('💣 假投資平台！') || r.includes('💥 被詐騙！') || r.includes('💸 被強迫推銷！'));
+    
+    if (isQuickActionExecuted && !selectedCardNames.includes('💰 彈性存款')) {
          selectedCardNames.unshift('💰 彈性存款');
     }
+    // 雖然詐騙卡片在 handleCardClick 中執行並記錄 log 了，但還是將其名字加入 action list
+    if (isScamActionExecuted && !selectedCardNames.includes(gameState.currentCards[gameState.selectedIndices[0]].title)) {
+         selectedCardNames.unshift(gameState.currentCards[gameState.selectedIndices[0]].title);
+    }
+
 
     log(executionLog + results.join(' | '));
     
@@ -712,6 +746,7 @@ function applyPayment(p, cost) {
 /**
  * 核心損失函數：優先扣除現金，現金不足則扣除存款
  * 適用於**強制損失或詐騙事件**，**允許存款變為負債**。
+ * 這是本次修正的重點，確保所有強制損失邏輯一致。
  * @param {object} p - 玩家對象
  * @param {number} loss - 需支付的損失額度
  * @returns {number} 實際損失額度
@@ -968,14 +1003,14 @@ const generators = {
         };
     },
     
-    // --- 詐騙/高風險卡片生成器 (已移除金額顯示) ---
+    // --- 詐騙/高風險卡片生成器 (詐騙金額隨機化) ---
     scamCrypto: () => ({
         title: '💥 飆升幣投資', tag: '詐騙陷阱', 
-        cost: 0, // 確保 UI 不顯示 cost
-        scamCost: 2000, // 內部損失金額
+        cost: 0, 
+        scamCost: true, // 僅作為標記
         desc: '加入 LINE 群組，號稱投資虛擬貨幣一週翻倍，誘惑你投入**大量資金**。',
-        effect: (p, card) => {
-            const loss = card.scamCost; // 使用內部損失金額
+        effect: (p) => { // 移除 card 參數
+            const loss = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); // 隨機損失
             const actualLoss = applyLoss(p, loss);
             p.hp = Math.max(0, p.hp - 5);
             return `💣 假投資平台！投入的 $${actualLoss} 歸零。健康 -5。`;
@@ -983,11 +1018,11 @@ const generators = {
     }),
     scamSocial: () => ({
         title: '❌ 國外高薪機會', tag: '詐騙陷阱', 
-        cost: 0, // 確保 UI 不顯示 cost
-        scamCost: 1000, // 內部損失金額
+        cost: 0, 
+        scamCost: true, // 僅作為標記
         desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (損失**一筆資金**)',
-        effect: (p, card) => {
-            const loss = card.scamCost; // 使用內部損失金額
+        effect: (p) => { // 移除 card 參數
+            const loss = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); // 隨機損失
             const actualLoss = applyLoss(p, loss);
             p.hp = Math.max(0, p.hp - 10);
             return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區)。`;
@@ -995,11 +1030,11 @@ const generators = {
     }),
     scamInsurance: () => ({
         title: '💸 高報酬保單', tag: '強迫推銷', 
-        cost: 0, // 確保 UI 不顯示 cost
-        scamCost: 5000, // 內部損失金額
+        cost: 0, 
+        scamCost: true, // 僅作為標記
         desc: '親戚推銷高報酬保單，強調儲蓄功能。你是否購買？ (**大額支出**)',
-        effect: (p, card) => {
-            const loss = card.scamCost; // 使用內部損失金額
+        effect: (p) => { // 移除 card 參數
+            const loss = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); // 隨機損失
             const actualLoss = applyLoss(p, loss);
             return `💸 被強迫推銷！損失 $${actualLoss} 買了一整套超貴保單。`;
         }
@@ -1042,7 +1077,6 @@ function generateCards(playerIdx) {
             generators.invest, generators.invest, generators.invest,
             generators.investStock,
             // --- 詐騙卡片：將其加入兩次，以降低相對出現機率 ---
-            // 正常卡片的數量約 15 張，加入 3 張詐騙卡 (15:3 = 5:1)。現在加入 6 張非詐騙卡，稀釋機率。
             generators.depositFlexible, generators.bonusCash, generators.financialSeminar,
             generators.rateBoostLong, generators.depositFixed, generators.invest, 
             generators.scamCrypto, generators.scamSocial, generators.scamInsurance, 
@@ -1165,24 +1199,10 @@ function renderCards(isSpecialEvent) {
         `;
         div.onclick = () => {
             if (!isDisabled) {
-                // 詐騙卡片的 effect 函數需要傳入 card 本身才能讀取 scamCost
+                
+                // 詐騙卡片單次執行邏輯
                 if (isScam) {
-                    // 對於非彈性存款，單獨處理詐騙卡的執行邏輯
-                    if (gameState.selectionCount + gameState.selectedIndices.length < gameState.maxSelections) {
-                        card.effect(player, card); // 立即執行詐騙卡的 effect
-                        gameState.selectionCount++;
-
-                        let currentSelected = gameState.selectionCount + gameState.selectedIndices.length;
-                        if (currentSelected < gameState.maxSelections) {
-                            log(`✅ ${player.name} 執行詐騙行動，還可再選 ${gameState.maxSelections - currentSelected} 張卡片。`);
-                            document.getElementById('confirm-btn').disabled = false;
-                            document.getElementById('confirm-btn').innerText = `確認行動 (已選 ${currentSelected} / ${gameState.maxSelections})`;
-                        } else {
-                            confirmAction(true); 
-                        }
-                    } else {
-                         log(`⚠️ 最多只能選擇 ${gameState.maxSelections - gameState.selectionCount} 張卡片！`, 'bad');
-                    }
+                    handleCardClick(idx); // 透過 handleCardClick 執行詐騙邏輯
                     return;
                 }
                 
@@ -1321,14 +1341,9 @@ function processTurn() {
         
         let actualPayment = totalObligation; // 總欠款額度
 
-        // 優先扣除現金，不足則從存款扣除 (結算時允許存款變為負債)
-        if (p.cash >= actualPayment) {
-            p.cash -= actualPayment;
-        } else {
-            let shortage = actualPayment - p.cash;
-            p.cash = 0;
-            p.bank -= shortage; // 不足的從存款中扣除，允許負債
-        }
+        // **修正點：使用 applyLoss 確保先扣現金再扣存款**
+        applyLoss(p, actualPayment);
+
 
         logs.push(`生活費 + 奉獻 -$${totalObligation}`);
         
@@ -1396,14 +1411,8 @@ function handleGlobalEvents() {
             let cost = event.amt; 
             
             if (cost > 0) { // 帳單/損失
-                 // 優先扣除現金，不足則從存款扣除 (允許負資產)
-                if (p.cash >= cost) {
-                     p.cash -= cost;
-                } else {
-                     let shortage = cost - p.cash;
-                     p.cash = 0;
-                     p.bank -= shortage;
-                }
+                 // **修正點：使用 applyLoss 確保先扣現金再扣存款**
+                applyLoss(p, cost);
             } else { // 收入/增益
                 p.cash += amount; 
             }
