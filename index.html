@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.4 (最終特殊事件修正)</title>
+    <title>社畜生存戰：理財 Roguelike v5.5 (正常卡牌扣款修正)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -641,6 +641,7 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
              // 超時嘗試選擇「婉拒/拒絕」選項作為默認
              const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
             if (fallbackOption) {
+                // 特殊事件，不檢查資產，直接執行效果
                 fallbackOption.effect(player);
                 selectedCardNames.push(fallbackOption.title);
                 log(`🚨 超時，特殊事件自動選擇「${fallbackOption.title}」。`, 'log-event');
@@ -741,6 +742,38 @@ function recordHistory(player, actions) {
     });
 }
 
+/**
+ * 核心扣款函數：優先扣除現金，現金不足則扣除存款
+ * @param {object} p - 玩家對象
+ * @param {number} cost - 需支付的成本
+ * @returns {string} 扣款結果描述
+ */
+function applyPayment(p, cost) {
+    let actualCost = cost;
+    let bankDeduction = 0;
+
+    if (p.cash >= actualCost) {
+        p.cash -= actualCost;
+        return `成功支付 $${actualCost} (現金支付)`;
+    } else {
+        let shortage = actualCost - p.cash;
+        p.cash = 0;
+        
+        // 嘗試從存款中扣除
+        if (p.bank >= shortage) {
+            p.bank -= shortage;
+            bankDeduction = shortage;
+            return `成功支付 $${actualCost} (現金+存款支付$${bankDeduction})`;
+        } else {
+            // 正常回合卡片不允許資產總額（現金+存款）變為負數
+            // 實際上這段邏輯在 renderCards 中已經防止，這裡僅作為最終保險
+            // 如果走到這裡，說明資產總額不足，但由於 renderCards 已禁用，所以這通常不會發生。
+            return '資產總額不足，交易取消 (應已在UI禁用)';
+        }
+    }
+}
+
+
 // --- 卡牌生成器 (新增特殊事件) ---
 function getDynamicPay(basePay) {
     if (gameState.turn === 1) return basePay;
@@ -751,15 +784,20 @@ function getCardCost(card) {
     // 特殊事件的成本 now 儲存在 card.loss 屬性中
     if (card.loss !== undefined) return 0; // 避免在 UI 上顯示詐騙成本
     
+    // 如果卡片本身已經定義了 cost，則使用它
+    if (card.cost !== undefined && card.cost > 0) return card.cost;
+    
     switch(card.title) {
         case '🔒 定期存款':
         case '🏦 藍籌股投資':
         case '🚀 短期投資機會':
+             // 讀取描述中的投入金額作為成本
              const match = card.desc.match(/投入 \$(\d+)/) || card.desc.match(/鎖定現金 \$(\d+)/);
             return match ? parseInt(match[1]) : 0;
         case '🤓 理財講座':
         case '🧘 深度休息':
-             return 20;
+             // 休息和講座的成本在 generator 中動態計算或定義
+             return card.cost; 
         default:
             return 0;
     }
@@ -853,9 +891,12 @@ const generators = {
             title: '🔒 定期存款', tag: '穩定理財', cost: cost,
             desc: `鎖定現金 $${cost}，${turns} 輪後領回。總報酬率約 ${(fixedRate * turns * 100).toFixed(1)}%。`,
             effect: (p) => {
-                p.cash -= cost;
-                p.lockedSavings.push({ cost: cost, turnsLeft: turns, totalReturnRate: totalReturnRate, name: '定存' });
-                return `鎖定 $${cost}，${turns} 輪後領回。`;
+                const result = applyPayment(p, cost);
+                if (result.includes('成功支付')) {
+                    p.lockedSavings.push({ cost: cost, turnsLeft: turns, totalReturnRate: totalReturnRate, name: '定存' });
+                    return `鎖定 $${cost}，${turns} 輪後領回。` + ` (${result})`;
+                }
+                return result; 
             }
         };
     },
@@ -874,7 +915,15 @@ const generators = {
         return {
             title: '🤓 理財講座', tag: '付費特殊', cost: cost,
             desc: `花費 $${cost}，存款利率在接下來 ${turns} 輪臨時 +${(v * 100).toFixed(1)}%。`,
-            effect: (p) => { p.cash -= cost; p.tempRateBoost.amount = v; p.tempRateBoost.turnsLeft = turns; return `參加講座，利率臨時 +${(v * 100).toFixed(1)}% (${turns} 輪)`; }
+            effect: (p) => { 
+                const result = applyPayment(p, cost);
+                if (result.includes('成功支付')) {
+                    p.tempRateBoost.amount = v; 
+                    p.tempRateBoost.turnsLeft = turns; 
+                    return `參加講座，利率臨時 +${(v * 100).toFixed(1)}% (${turns} 輪)` + ` (${result})`;
+                }
+                return result; 
+            }
         };
     },
     invest: () => {
@@ -892,9 +941,12 @@ const generators = {
             title: '🚀 短期投資機會', tag: riskText, riskLevel: riskTag, cost: cost,
             desc: `投入 $${cost}，${wait} 輪後結算。風險值: ${risk}。`,
             effect: (p) => {
-                p.cash -= cost;
-                p.investments.push({ cost: cost, maxRoi: maxRoi, risk: risk, turnsLeft: wait });
-                return `投入資金 $${cost}`;
+                const result = applyPayment(p, cost);
+                if (result.includes('成功支付')) {
+                    p.investments.push({ cost: cost, maxRoi: maxRoi, risk: risk, turnsLeft: wait });
+                    return `投入資金 $${cost}` + ` (${result})`;
+                }
+                return result; 
             }
         };
     },
@@ -908,15 +960,18 @@ const generators = {
             title: '🏦 藍籌股投資', tag: '長期穩定', cost: cost,
             desc: `投入 $${cost} 買入藍籌股，每輪收取股利。估計總報酬率約 ${estimatedROI}%。`,
             effect: (p) => {
-                p.cash -= cost;
-                let existingStock = p.stocks.find(s => s.name === '藍籌股');
-                if (existingStock) {
-                    existingStock.cost += cost;
-                    return `再次投入 $${cost} 購買藍籌股`;
-                } else {
-                    p.stocks.push({ name: '藍籌股', cost: cost });
-                    return `投入 $${cost} 購買藍籌股`;
+                const result = applyPayment(p, cost);
+                if (result.includes('成功支付')) {
+                    let existingStock = p.stocks.find(s => s.name === '藍籌股');
+                    if (existingStock) {
+                        existingStock.cost += cost;
+                        return `再次投入 $${cost} 購買藍籌股` + ` (${result})`;
+                    } else {
+                        p.stocks.push({ name: '藍籌股', cost: cost });
+                        return `投入 $${cost} 購買藍籌股` + ` (${result})`;
+                    }
                 }
+                return result; 
             }
         };
     },
@@ -932,32 +987,26 @@ const generators = {
             title: '🧘 深度休息', tag: '健康/治療', cost: totalCost, 
             desc: desc,
             effect: (p) => {
-                const actualCost = Math.min(totalCost, p.cash + p.bank);
-                if (actualCost <= 0) return '資產不足，無法支付！'; 
-                
-                if (p.cash >= actualCost) {
-                    p.cash -= actualCost;
-                } else {
-                    let shortage = actualCost - p.cash;
-                    p.cash = 0;
-                    p.bank -= shortage;
+                const result = applyPayment(p, totalCost);
+                if (!result.includes('成功支付')) {
+                    return '資產不足，無法支付！'; 
                 }
 
                 p.hp = Math.min(CONFIG.maxHp, p.hp + healAmt);
-                let report = `健康恢復 +${healAmt} (花費$${actualCost})`;
+                let report = `健康恢復 +${healAmt}`;
                 
                 if (p.sicknessCost > 0) {
                     report += `，清除醫療費用 $${p.sicknessCost}。`;
                     p.sicknessCost = 0; 
                 }
-                return report;
+                return report + ` (${result})`;
             }
         };
     },
     
     // --- 特殊事件卡牌產生器 ---
     specialEventCard: (type) => {
-        // 集中處理資產扣除邏輯，允許負債
+        // 特殊事件的資產扣除邏輯：只檢查現金，不足則從存款扣除，**允許存款變為負債**
         const applyLoss = (p, loss) => {
             let actualLoss = loss;
             
@@ -1164,6 +1213,7 @@ function renderCards(isSpecialEvent) {
 
             clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
 
+            // 修正點：檢查現金 + 存款總額是否足夠
             if (cost > totalLiquidAssets && cost > 0) {
                  isDisabled = true;
                  disableReason = `🚨 資產($${totalLiquidAssets})不足$${cost}，無法選擇此項。`;
@@ -1344,7 +1394,7 @@ function processTurn() {
         
         let actualPayment = totalObligation; // 總欠款額度
 
-        // 優先扣除現金
+        // 優先扣除現金，不足則從存款扣除 (結算時允許存款變為負債)
         if (p.cash >= actualPayment) {
             p.cash -= actualPayment;
         } else {
@@ -1402,7 +1452,7 @@ function handleGlobalEvents() {
         let bill = bills[randInt(0, bills.length-1)];
         log(`[帳單] ${bill.t} -$${bill.amt}`, 'event');
         gameState.players.forEach(p => {
-            // 賬單也應允許負資產
+            // 賬單也應允許負資產 (因為屬於強制結算支出)
             if (p.cash >= bill.amt) {
                  p.cash -= bill.amt;
             } else {
