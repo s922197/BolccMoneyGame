@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.3 (最終UI對齊版)</title>
+    <title>社畜生存戰：理財 Roguelike v2.4 (大螢幕優化版)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -12,37 +12,47 @@
             --warning: #f39c12;
             --bg: #ecf0f1;
             --card-bg: #fff;
+            /* 調整基礎字體大小 */
+            font-size: 18px; /* 基礎字體放大 */
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg);
             color: var(--primary);
             margin: 0;
-            padding: 10px;
+            padding: 15px; /* 增加整體邊距 */
             display: flex;
             flex-direction: column;
             align-items: center;
             user-select: none;
         }
         .container {
-            max-width: 1200px; 
+            max-width: 1400px; /* 稍微增加最大寬度 */
             width: 100%;
         }
         
+        /* 標題與按鈕放大 */
+        #setup-screen h1 { font-size: 2.5em; }
+        #setup-screen h3 { font-size: 1.5em; }
+        #setup-screen p { font-size: 1.1em; }
+        .confirm-btn {
+            padding: 15px 50px;
+            font-size: 1.4em;
+        }
+
         /* 儀表板 - 強制對齊和等寬 */
         .dashboard {
             display: flex;
             justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 15px;
+            gap: 15px; /* 增加間距 */
+            margin-bottom: 20px;
         }
         .player-stats {
             background: var(--card-bg);
-            padding: 8px 12px; 
+            padding: 15px 20px; /* 增加內距 */
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             
-            /* 核心對齊和等寬設置 */
             flex-basis: 0;
             flex-grow: 1; 
             
@@ -50,6 +60,7 @@
             transition: all 0.3s;
             position: relative;
         }
+        .player-stats h3 { font-size: 1.4em; margin-top: 0; margin-bottom: 10px; }
         .player-stats.active {
             border-top-color: #3498db;
             transform: translateY(-2px);
@@ -60,47 +71,52 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
-            margin: 3px 0; 
-            font-size: 0.85em; 
+            margin: 5px 0; /* 增加間距 */
+            font-size: 1.1em; /* 放大字體 */
             align-items: center;
         }
-        .money { color: var(--accent); font-weight: bold; font-family: monospace; font-size: 1em; }
+        .money { 
+            color: var(--accent); 
+            font-weight: bold; 
+            font-family: monospace; 
+            font-size: 1.2em; /* 關鍵數字再放大 */
+        }
         .debt { color: var(--danger); font-weight: bold; }
         
         /* 健康條 */
-        .hp-bar-bg { width: 80px; height: 8px; background: #ddd; border-radius: 5px; overflow: hidden; }
+        .hp-bar-bg { width: 100px; height: 10px; background: #ddd; border-radius: 5px; overflow: hidden; }
         .hp-bar-fill { height: 100%; transition: width 0.5s, background 0.5s; }
 
         /* 遊戲資訊與階段 */
         .phase-indicator {
             text-align: center;
-            font-size: 1.1em;
+            font-size: 1.4em; /* 放大字體 */
             font-weight: bold;
             color: #d35400;
-            margin: 10px 0;
+            margin: 15px 0;
             background: #fad7a0;
-            padding: 5px;
+            padding: 8px;
             border-radius: 5px;
         }
 
         /* 卡牌區域 */
         .cards-area {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* 增加卡片最小寬度 */
+            gap: 20px;
             margin-bottom: 20px;
         }
         .card {
             background: var(--card-bg);
             border: 2px solid #eee;
             border-radius: 8px;
-            padding: 12px;
+            padding: 15px; /* 增加卡片內距 */
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-height: 160px;
+            min-height: 180px; /* 增加卡片最小高度 */
             position: relative;
         }
         .card:hover { transform: translateY(-3px); border-color: #bdc3c7; }
@@ -114,15 +130,15 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
-        .card-title { font-weight: bold; color: #2980b9; font-size: 1em; line-height: 1.2; }
-        .card-desc { font-size: 0.8em; color: #555; line-height: 1.4; flex-grow: 1; }
+        .card-title { font-weight: bold; color: #2980b9; font-size: 1.3em; line-height: 1.2; }
+        .card-desc { font-size: 1em; color: #555; line-height: 1.4; flex-grow: 1; }
         
         /* 標籤 */
         .tag {
-            font-size: 0.65em;
-            padding: 2px 6px;
+            font-size: 0.8em; /* 放大標籤字體 */
+            padding: 4px 8px;
             border-radius: 4px;
             color: white;
             font-weight: bold;
@@ -139,35 +155,22 @@
         /* 事件日誌優化 */
         .log-area {
             background: #fff;
-            padding: 15px;
+            padding: 20px; /* 增加內距 */
             border-radius: 8px;
-            height: 150px; 
+            height: 200px; /* 增加高度 */
             overflow-y: auto;
             border: 1px solid #ddd;
             font-family: monospace;
-            font-size: 1em; 
+            font-size: 1.1em; /* 放大字體 */
         }
-        .log-entry { margin-bottom: 5px; border-bottom: 1px dashed #eee; padding-bottom: 2px; }
-        .log-turn { color: #fff; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
-        .log-bad { color: #c0392b; }
-        .log-good { color: #27ae60; }
+        .log-area h3 { font-size: 1.3em; }
+        .log-entry { margin-bottom: 7px; border-bottom: 1px dashed #eee; padding-bottom: 4px; }
+        .log-turn { color: #fff; background: #e67e22; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
+        .log-bad { color: #c0392b; font-weight: bold; }
+        .log-good { color: #27ae60; font-weight: bold; }
 
         /* 狀態文字小字 */
-        .status-text { font-size: 0.75em; color: #7f8c8d; margin-top: 3px; line-height: 1.4; }
-        
-        /* 開始按鈕 */
-        .confirm-btn {
-            padding: 12px 40px;
-            font-size: 1.2em;
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            box-shadow: 0 4px 0 #1e8449;
-            transition: transform 0.1s;
-        }
-        .confirm-btn:active { transform: translateY(4px); box-shadow: none; }
+        .status-text { font-size: 0.9em; color: #7f8c8d; margin-top: 5px; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -200,7 +203,7 @@
                 </div>
                 <div class="stat-row">
                     <span>健康值</span>
-                    <div style="display:flex; align-items:center; gap:5px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
                         <span id="p1-hp-text">100</span>
                         <div class="hp-bar-bg"><div class="hp-bar-fill" id="p1-hp-bar" style="width:100%; background:#27ae60;"></div></div>
                     </div>
@@ -217,7 +220,7 @@
                 </div>
                 <div class="stat-row">
                     <span>健康值</span>
-                    <div style="display:flex; align-items:center; gap:5px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
                         <span id="p2-hp-text">100</span>
                         <div class="hp-bar-bg"><div class="hp-bar-fill" id="p2-hp-bar" style="width:100%; background:#27ae60;"></div></div>
                     </div>
@@ -561,14 +564,14 @@ function renderCards() {
                 </div>
                 <div class="card-desc">${card.desc}</div>
             </div>
-            <small style="color:#7f8c8d; font-size:0.75em;">點擊即執行</small>
+            <small style="color:#7f8c8d; font-size:0.9em;">點擊即執行</small>
         `;
         div.onclick = () => handleCardClick(idx);
         container.appendChild(div);
     });
 }
 
-// --- 結算核心 (不變) ---
+// --- 結算核心 (包含收入日誌) ---
 function processTurn() {
     log(`--- 第 ${gameState.turn} 輪結算 ---`, 'turn');
     
@@ -577,6 +580,7 @@ function processTurn() {
     gameState.players.forEach(p => {
         let logs = [];
         p.roundIncome = 0;
+        let jobIncome = 0; // 新增變數記錄工作總收入
 
         // 1. 計算工時與健康
         let dailyHours = 0;
@@ -603,15 +607,22 @@ function processTurn() {
         if (p.stableJob) {
             p.roundIncome += p.stableJob.pay;
             p.cash += p.stableJob.pay;
+            jobIncome += p.stableJob.pay;
         }
         
         // 兼職
         p.partTimeJobs.forEach(j => {
             p.roundIncome += j.pay;
             p.cash += j.pay;
+            jobIncome += j.pay;
             j.turnsLeft--;
         });
         p.partTimeJobs = p.partTimeJobs.filter(j => j.turnsLeft > 0);
+        
+        // 將工作收入加入日誌
+        if (jobIncome > 0) {
+             logs.push(`<span class="log-good">工作收入 +$${jobIncome}</span>`);
+        }
 
         // 4. 投資結算 (含風險)
         p.investments = p.investments.filter(inv => {
@@ -626,16 +637,17 @@ function processTurn() {
                     if (inv.risk > 80 && Math.random() < 0.2) lossRate = 150; // 爆倉負債
                     
                     let returnVal = Math.floor(inv.cost * (100 - lossRate) / 100);
-                    let resultAmt = returnVal - inv.cost; 
+                    let netLoss = inv.cost - returnVal; 
                     p.cash += returnVal; 
-                    logs.push(`<span class="log-bad">投資失利(R:${inv.risk}) 虧損 $${-resultAmt + inv.cost - returnVal}</span>`);
+                    logs.push(`<span class="log-bad">投資失利(R:${inv.risk}) 虧損 $${netLoss}</span>`);
                 } else {
                     // 獲利
                     let profitRate = randInt(10, inv.maxRoi - 100);
                     let totalBack = Math.floor(inv.cost * (100 + profitRate) / 100);
+                    let netProfit = totalBack - inv.cost;
                     p.cash += totalBack;
-                    logs.push(`<span class="log-good">投資獲利(R:${inv.risk}) +$${totalBack - inv.cost}</span>`);
-                    p.roundIncome += (totalBack - inv.cost);
+                    logs.push(`<span class="log-good">投資獲利(R:${inv.risk}) +$${netProfit}</span>`);
+                    p.roundIncome += netProfit;
                 }
                 return false; 
             }
@@ -643,19 +655,21 @@ function processTurn() {
         });
 
         // 5. 強制支出 (十一 + 生活費)
+        p.cash -= CONFIG.livingCost;
+        logs.push(`生活費 -$${CONFIG.livingCost}`);
+
         if (p.roundIncome > 0) {
             let tithe = Math.floor(p.roundIncome * CONFIG.titheRate);
             p.cash -= tithe;
             logs.push(`十一奉獻 -$${tithe}`);
         }
-        p.cash -= CONFIG.livingCost;
 
         // 6. 利息
         let currentRate = p.rate + p.tempRateBoost;
         let interest = Math.floor(p.bank * currentRate);
         if (interest > 0) {
             p.bank += interest;
-            logs.push(`利息(${(currentRate*100).toFixed(1)}%) +$${interest}`);
+            logs.push(`利息(${(currentRate*100).toFixed(1)}%) <span class="log-good">+$${interest}</span>`);
         }
         p.tempRateBoost = 0;
 
@@ -668,14 +682,14 @@ function processTurn() {
             } else {
                 p.cash += p.bank;
                 p.bank = 0;
-                logs.push(`<span class="log-bad">負債累累 $${p.cash}</span>`);
+                logs.push(`<span class="log-bad">現金不足產生負債 $${-p.cash}</span>`);
             }
         }
         
         // 限制 HP 範圍
         if (p.hp < 0) p.hp = 0;
 
-        if (logs.length) log(`${p.name}: ${logs.join(', ')}`);
+        if (logs.length) log(`${p.name}: ${logs.join(' | ')}`);
     });
 
     gameState.turn++;
@@ -742,7 +756,7 @@ function updatePlayerUI(idx, prefix) {
     // 狀態描述
     let statusParts = [];
     if (p.stableJob) {
-        statusParts.push(`${p.stableJob.name} (${p.stableJob.hours}hr/日)`);
+        statusParts.push(`正職: ${p.stableJob.name} (${p.stableJob.hours}hr/日)`);
     }
     else statusParts.push("待業中");
     
@@ -760,16 +774,16 @@ function endGame() {
 
     let html = `
         <div style="text-align:center; background:white; padding:30px; border-radius:10px;">
-            <h1 style="color:#e67e22">${winner}</h1>
-            <div style="display:flex; justify-content:space-around; margin:20px 0;">
-                <div>
+            <h1 style="color:#e67e22; font-size: 2.5em;">${winner}</h1>
+            <div style="display:flex; justify-content:space-around; margin:30px 0;">
+                <div style="font-size: 1.2em;">
                     <h3>A 組總資產</h3>
-                    <div style="font-size:2em; color:#27ae60">$${p1Total}</div>
+                    <div style="font-size:2.5em; color:#27ae60">$${p1Total}</div>
                     <small>健康: ${Math.floor(gameState.players[0].hp)}</small>
                 </div>
-                <div>
+                <div style="font-size: 1.2em;">
                     <h3>B 組總資產</h3>
-                    <div style="font-size:2em; color:#27ae60">$${p2Total}</div>
+                    <div style="font-size:2.5em; color:#27ae60">$${p2Total}</div>
                     <small>健康: ${Math.floor(gameState.players[1].hp)}</small>
                 </div>
             </div>
