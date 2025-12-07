@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.0</title>
+    <title>社畜生存戰：理財 Roguelike v2.1</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -25,23 +25,26 @@
             user-select: none;
         }
         .container {
-            max-width: 1000px;
+            max-width: 1200px; /* 增加最大寬度以容納單行儀表板 */
             width: 100%;
         }
         
-        /* 儀表板 */
+        /* 儀表板 - 強制單行顯示 */
         .dashboard {
             display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-bottom: 20px;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 15px;
+            overflow-x: auto; /* 允許橫向滾動 */
+            padding-bottom: 5px; 
         }
         .player-stats {
             background: var(--card-bg);
-            padding: 15px;
-            border-radius: 10px;
+            padding: 10px 15px; 
+            border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            flex: 1 1 300px;
+            flex: 0 0 49%; /* 佔據約一半寬度，不換行 */
+            min-width: 350px; /* 確保最小寬度 */
             border-top: 5px solid #bdc3c7;
             transition: all 0.3s;
             position: relative;
@@ -56,30 +59,21 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
-            margin: 6px 0;
-            font-size: 1em;
+            margin: 4px 0;
+            font-size: 0.9em;
             align-items: center;
         }
-        .money { color: var(--accent); font-weight: bold; font-family: monospace; font-size: 1.1em; }
+        .money { color: var(--accent); font-weight: bold; font-family: monospace; font-size: 1em; }
         .debt { color: var(--danger); font-weight: bold; }
         
         /* 健康條 */
-        .hp-bar-bg {
-            width: 100px;
-            height: 10px;
-            background: #ddd;
-            border-radius: 5px;
-            overflow: hidden;
-        }
-        .hp-bar-fill {
-            height: 100%;
-            transition: width 0.5s, background 0.5s;
-        }
+        .hp-bar-bg { width: 80px; height: 8px; background: #ddd; border-radius: 5px; overflow: hidden; }
+        .hp-bar-fill { height: 100%; transition: width 0.5s, background 0.5s; }
 
         /* 遊戲資訊與階段 */
         .phase-indicator {
             text-align: center;
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
             color: #d35400;
             margin: 10px 0;
@@ -91,7 +85,7 @@
         /* 卡牌區域 */
         .cards-area {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
@@ -105,15 +99,11 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-height: 180px;
+            min-height: 160px;
             position: relative;
         }
         .card:hover { transform: translateY(-3px); border-color: #bdc3c7; }
-        .card.selected {
-            border-color: var(--accent);
-            background-color: #e8f8f5;
-            box-shadow: 0 0 0 2px var(--accent);
-        }
+        /* 移除 selected 樣式，因為點擊即執行 */
         .card.disabled {
             opacity: 0.5;
             pointer-events: none;
@@ -127,11 +117,11 @@
             margin-bottom: 8px;
         }
         .card-title { font-weight: bold; color: #2980b9; font-size: 1em; line-height: 1.2; }
-        .card-desc { font-size: 0.85em; color: #555; line-height: 1.4; flex-grow: 1; }
+        .card-desc { font-size: 0.8em; color: #555; line-height: 1.4; flex-grow: 1; }
         
         /* 標籤 */
         .tag {
-            font-size: 0.7em;
+            font-size: 0.65em;
             padding: 2px 6px;
             border-radius: 4px;
             color: white;
@@ -144,37 +134,18 @@
         .tag-risk-mid { background: #f39c12; }
         .tag-risk-high { background: #c0392b; }
         .tag-none { background: #95a5a6; }
-
-        /* 確認按鈕 */
-        .action-area {
-            text-align: center;
-            margin: 20px 0;
-            height: 50px;
-        }
-        .confirm-btn {
-            padding: 12px 40px;
-            font-size: 1.2em;
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            box-shadow: 0 4px 0 #1e8449;
-            transition: transform 0.1s;
-        }
-        .confirm-btn:active { transform: translateY(4px); box-shadow: none; }
-        .confirm-btn:disabled { background: #95a5a6; box-shadow: none; cursor: not-allowed; }
+        .tag-special { background: #8e44ad; }
 
         /* 日誌 */
         .log-area {
             background: #fff;
             padding: 15px;
             border-radius: 8px;
-            height: 150px;
+            height: 120px;
             overflow-y: auto;
             border: 1px solid #ddd;
             font-family: monospace;
-            font-size: 0.9em;
+            font-size: 0.8em;
         }
         .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #eee; }
         .log-turn { color: #fff; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
@@ -182,7 +153,10 @@
         .log-good { color: #27ae60; }
 
         /* 狀態文字小字 */
-        .status-text { font-size: 0.8em; color: #7f8c8d; margin-top: 5px; line-height: 1.4; }
+        .status-text { font-size: 0.75em; color: #7f8c8d; margin-top: 3px; line-height: 1.4; }
+
+        /* 移除行動區域，因為點擊即執行 */
+        .action-area { display: none; } 
     </style>
 </head>
 <body>
@@ -193,7 +167,7 @@
         <h3>理財 x 健康 x 隨機事件</h3>
         <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; text-align: left;">
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
-            <p>✅ <b>規則：</b>每輪從 5 個選項中<b>選擇 2 個</b>執行</p>
+            <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 個**執行</p>
             <p>❤️ <b>健康：</b>工時過長(>8hr)會扣健康，健康低容易生病破財</p>
             <p>💼 <b>工作：</b>穩定工作只能一份，可隨時被新工作替換</p>
         </div>
@@ -208,7 +182,7 @@
 
         <div class="dashboard">
             <div class="player-stats" id="p1-stats">
-                <h3>👨‍💼 A 組 <span style="font-size:0.6em; color:#7f8c8d">(玩家 1)</span></h3>
+                <h3>👨‍💼 A 組</h3>
                 <div class="stat-row">
                     <span>現金/存款</span>
                     <span><span class="money" id="p1-cash">$100</span> / <span class="money" id="p1-bank">$0</span></span>
@@ -225,7 +199,7 @@
             </div>
 
             <div class="player-stats" id="p2-stats">
-                <h3>👩‍💻 B 組 <span style="font-size:0.6em; color:#7f8c8d">(玩家 2)</span></h3>
+                <h3>👩‍💻 B 組</h3>
                 <div class="stat-row">
                     <span>現金/存款</span>
                     <span><span class="money" id="p2-cash">$100</span> / <span class="money" id="p2-bank">$0</span></span>
@@ -245,8 +219,7 @@
         <div id="cards-container" class="cards-area"></div>
 
         <div class="action-area">
-            <button id="confirm-btn" class="confirm-btn" onclick="confirmSelection()" disabled>確認選擇 (0/2)</button>
-        </div>
+            </div>
 
         <h3>📝 事件日誌</h3>
         <div class="log-area" id="game-log"></div>
@@ -263,7 +236,8 @@ const CONFIG = {
     startHp: 100,
     maxHp: 100,
     safeHours: 8, // 每日安全工時
-    overworkPenalty: 3 // 每超時1小時扣除的健康值
+    overworkPenalty: 3, // 每超時1小時扣除的健康值
+    turnsPerMonth: 4 // 遊戲中假設 1 輪 = 1 週, 故 1 月約 4 輪
 };
 
 let gameState = {
@@ -271,7 +245,7 @@ let gameState = {
     phase: 'p1_choice', 
     players: [],
     currentCards: [],
-    selectedCardIndices: []
+    selectedCardIndex: null // 只需要一個選擇
 };
 
 // --- 初始化 ---
@@ -299,7 +273,7 @@ function startGame() {
     gameState.players = [createPlayer('A 組'), createPlayer('B 組')];
     
     log("=== 遊戲開始 ===", 'turn');
-    log("目標：活下去並致富。每日工時超過 8 小時將損害健康！");
+    log("首輪固定為工作機會，請謹慎選擇。");
     
     startPlayerTurn(0);
 }
@@ -307,68 +281,52 @@ function startGame() {
 // --- 遊戲流程控制 ---
 function startPlayerTurn(playerIdx) {
     gameState.phase = playerIdx === 0 ? 'p1_choice' : 'p2_choice';
-    gameState.selectedCardIndices = [];
+    gameState.selectedCardIndex = null;
     updateUI();
     generateCards(playerIdx);
-    updateConfirmButton();
 }
 
 function handleCardClick(index) {
-    const selected = gameState.selectedCardIndices;
-    const pos = selected.indexOf(index);
-
-    if (pos >= 0) {
-        // 取消選取
-        selected.splice(pos, 1);
-    } else {
-        // 選取 (最多2個)
-        if (selected.length < 2) {
-            selected.push(index);
-        }
-    }
-    
-    renderCards(); // 重繪選取狀態
-    updateConfirmButton();
-}
-
-function updateConfirmButton() {
-    const btn = document.getElementById('confirm-btn');
-    const count = gameState.selectedCardIndices.length;
-    btn.innerText = `確認執行 (${count}/2)`;
-    btn.disabled = count !== 2;
-}
-
-function confirmSelection() {
+    // 點擊即執行
     const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
     const player = gameState.players[playerIdx];
     
-    // 依序執行兩張卡片
-    // 注意：按順序執行，有可能第一張導致第二張條件不符(如現金不足)，需在 effect 中處理
-    gameState.selectedCardIndices.forEach(idx => {
-        const card = gameState.currentCards[idx];
-        const result = card.effect(player);
-        log(`${player.name} 執行 [${card.title}]: ${result}`);
-    });
+    // 禁用所有卡片，防止重複點擊
+    document.querySelectorAll('.card').forEach(card => card.classList.add('disabled'));
 
-    if (playerIdx === 0) {
-        startPlayerTurn(1);
-    } else {
-        gameState.phase = 'processing';
-        updateUI();
-        document.getElementById('cards-container').innerHTML = '<h3 style="text-align:center;width:100%;color:#aaa;">結算中...</h3>';
-        setTimeout(processTurn, 800);
-    }
+    const card = gameState.currentCards[index];
+    const result = card.effect(player);
+    log(`${player.name} 選擇並執行 [${card.title}]: ${result}`);
+
+    setTimeout(() => {
+        if (playerIdx === 0) {
+            startPlayerTurn(1); // 換 B 組
+        } else {
+            gameState.phase = 'processing';
+            updateUI();
+            document.getElementById('cards-container').innerHTML = '<h3 style="text-align:center;width:100%;color:#aaa;">結算中...</h3>';
+            setTimeout(processTurn, 800); // 結算
+        }
+    }, 500);
 }
 
 // --- 卡牌生成器 ---
+
+// 計算預估月收入 (假設 1 輪 = 1 週, 1 月 = 4 輪)
+function getEstimatedMonthlyIncome(pay, hours) {
+    // 假設每週工作 5 天，每輪 1 週
+    let monthlyPay = pay * CONFIG.turnsPerMonth;
+    return monthlyPay;
+}
+
 const generators = {
     // 穩定工作類 (替換制)
     jobStableStandard: () => ({
         type: 'JOB_STABLE',
         title: '💼 一般職員',
         tag: '穩定工作',
-        desc: '標準工時，週休二日。時薪普通但穩定。',
-        val: { pay: 200, hours: 8 }, // 每天8小時
+        desc: `標準工時 **8 小時**。預估月收入 $${getEstimatedMonthlyIncome(200, 8)}。`,
+        val: { pay: 200, hours: 8 }, 
         effect: (p) => {
             p.stableJob = { name: '一般職員', pay: 200, hours: 8, desc: '8hr/日' };
             return '獲得穩定工作 (8hr/日)';
@@ -378,9 +336,7 @@ const generators = {
         type: 'JOB_STABLE',
         title: '🏭 產線作業員',
         tag: '做二休二',
-        desc: '每日 12 小時，做二休二(平均工時較低，但工作日極累)。',
-        // 為了簡化，設平均日工時高於8一點點，或者直接設高工時高薪水
-        // 這裡設定：每天算 10 小時工時 (折衷)，薪水高
+        desc: `每日 **10 小時**。高薪但有過勞風險。預估月收入 $${getEstimatedMonthlyIncome(300, 10)}。`,
         val: { pay: 300, hours: 10 }, 
         effect: (p) => {
             p.stableJob = { name: '作業員(做二休二)', pay: 300, hours: 10, desc: '10hr/日(均)' };
@@ -391,13 +347,36 @@ const generators = {
         type: 'JOB_STABLE',
         title: '💻 責任制工程師',
         tag: '爆肝',
-        desc: '高薪，但每天平均工作 12 小時。',
+        desc: `每日 **12 小時**。極高收入但健康扣損嚴重。預估月收入 $${getEstimatedMonthlyIncome(450, 12)}。`,
         val: { pay: 450, hours: 12 },
         effect: (p) => {
             p.stableJob = { name: '責任制工程師', pay: 450, hours: 12, desc: '12hr/日' };
             return '獲得爆肝工作 (12hr/日)';
         }
     }),
+    jobStableLow: () => ({
+        type: 'JOB_STABLE',
+        title: '🛒 便利商店店員',
+        tag: '低薪',
+        desc: `標準工時 **8 小時**。收入較低，適合保守玩家。預估月收入 $${getEstimatedMonthlyIncome(150, 8)}。`,
+        val: { pay: 150, hours: 8 }, 
+        effect: (p) => {
+            p.stableJob = { name: '便利商店店員', pay: 150, hours: 8, desc: '8hr/日' };
+            return '獲得穩定低薪工作 (8hr/日)';
+        }
+    }),
+    jobStableMed: () => ({
+        type: 'JOB_STABLE',
+        title: '👨‍🏫 補習班老師',
+        tag: '中薪',
+        desc: `每日 **9 小時**。略微超時，中等收入。預估月收入 $${getEstimatedMonthlyIncome(250, 9)}。`,
+        val: { pay: 250, hours: 9 },
+        effect: (p) => {
+            p.stableJob = { name: '補習班老師', pay: 250, hours: 9, desc: '9hr/日' };
+            return '獲得中等工作 (9hr/日)';
+        }
+    }),
+
 
     // 兼職類 (疊加，有輪數)
     jobPartTime: () => {
@@ -418,7 +397,7 @@ const generators = {
 
     // 銀行類
     deposit: () => {
-        const v = randInt(50, 150); // 提高存款量
+        const v = randInt(50, 150); 
         return {
             title: '💰 存入資金',
             tag: '理財',
@@ -469,15 +448,14 @@ const generators = {
         if (risk > 80) { riskTag = 'risk-high'; riskText = '高風險'; }
 
         const cost = randInt(50, 100);
-        // 風險越高，潛在回報越高，但也可能賠錢
-        const maxRoi = 120 + Math.floor(risk * 1.5); // 120% ~ 270%
+        const maxRoi = 120 + Math.floor(risk * 1.5); 
         const wait = randInt(2, 4);
 
         return {
             title: '🚀 投資機會',
             tag: riskText,
-            riskLevel: riskTag, // 用於 UI 顏色
-            desc: `投入 $${cost}，${wait} 輪後結算。風險值: ${risk} (可能導致虧損)。`,
+            riskLevel: riskTag, 
+            desc: `投入 $${cost}，${wait} 輪後結算。風險值: ${risk} (可能導致虧損或負債)。`,
             effect: (p) => {
                 if (p.cash < cost) return '現金不足無法投資';
                 p.cash -= cost;
@@ -509,38 +487,43 @@ const generators = {
 
 function generateCards(playerIdx) {
     let pool = [];
-    
-    // 建構牌庫權重
-    // 1. 工作 (確保有機會換工作)
-    pool.push(generators.jobStableStandard);
-    pool.push(generators.jobStableStandard);
-    pool.push(generators.jobStableShift);
-    pool.push(generators.jobStableOvertime);
-    
-    // 2. 兼職
-    pool.push(generators.jobPartTime);
-    pool.push(generators.jobPartTime);
 
-    // 3. 銀行與投資
-    pool.push(generators.deposit); 
-    pool.push(generators.deposit);
-    pool.push(generators.deposit); // 多一點存錢機會
-    pool.push(generators.withdraw);
-    pool.push(generators.rateBoost);
-    pool.push(generators.rateBoost);
+    // T1: 固定為工作選擇
+    if (gameState.turn === 1) {
+        pool = [
+            generators.jobStableStandard,
+            generators.jobStableShift,
+            generators.jobStableOvertime,
+            generators.jobStableLow,
+            generators.jobStableMed
+        ];
+    } else {
+        // T2 之後：正常混合牌庫
+        pool = [
+            generators.jobStableStandard, generators.jobStableShift, generators.jobStableOvertime,
+            generators.jobPartTime, generators.jobPartTime,
+            generators.deposit, generators.deposit, generators.deposit,
+            generators.withdraw, generators.rateBoost,
+            generators.invest, generators.invest, generators.invest,
+            generators.rest, generators.rest
+        ];
+    }
     
-    pool.push(generators.invest);
-    pool.push(generators.invest);
-    pool.push(generators.invest);
-
-    // 4. 健康
-    pool.push(generators.rest);
-
     // 洗牌抽 5 張
     let deck = [];
-    for(let i=0; i<5; i++) {
-        let gen = pool[Math.floor(Math.random() * pool.length)];
-        deck.push(gen());
+    if (gameState.turn === 1) {
+        // 首輪只從 5 個穩定工作 generator 中抽
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        deck = pool.slice(0, 5).map(genFunc => genFunc());
+    } else {
+         // T2+，從大池中隨機抽 5 個 generator 實例化
+        for(let i=0; i<5; i++) {
+            let gen = pool[Math.floor(Math.random() * pool.length)];
+            deck.push(gen());
+        }
     }
     
     gameState.currentCards = deck;
@@ -552,15 +535,15 @@ function renderCards() {
     container.innerHTML = '';
     
     gameState.currentCards.forEach((card, idx) => {
-        let isSelected = gameState.selectedCardIndices.includes(idx);
         let div = document.createElement('div');
-        div.className = `card ${isSelected ? 'selected' : ''}`;
+        // 移除 selected 樣式
+        div.className = `card`; 
         
         // Tag Color logic
         let tagClass = 'tag-none';
         if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
         else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
-        else if (card.tag.includes('健康')) tagClass = 'tag-risk-low';
+        else if (card.tag.includes('健康')) tagClass = 'tag-special';
 
         div.innerHTML = `
             <div>
@@ -570,13 +553,14 @@ function renderCards() {
                 </div>
                 <div class="card-desc">${card.desc}</div>
             </div>
+            <small style="color:#7f8c8d; font-size:0.75em;">點擊即執行</small>
         `;
         div.onclick = () => handleCardClick(idx);
         container.appendChild(div);
     });
 }
 
-// --- 結算核心 ---
+// --- 結算核心 (不變) ---
 function processTurn() {
     log(`--- 第 ${gameState.turn} 輪結算 ---`, 'turn');
     
@@ -595,11 +579,10 @@ function processTurn() {
             let over = dailyHours - CONFIG.safeHours;
             let dmg = over * CONFIG.overworkPenalty;
             p.hp -= dmg;
-            logs.push(`<span class="log-bad">過勞(${dailyHours}hr) 健康 -${dmg}</span>`);
+            logs.push(`<span class="log-bad">過勞(${dailyHours}hr) 健康 -${dmg.toFixed(1)}</span>`);
         }
 
         // 2. 生病判定
-        // 健康 100 -> 0% 機率, 健康 0 -> 50% 機率
         let sickChance = (100 - p.hp) * 0.5 / 100;
         if (Math.random() < sickChance) {
             let cost = 100;
@@ -623,32 +606,21 @@ function processTurn() {
         p.partTimeJobs = p.partTimeJobs.filter(j => j.turnsLeft > 0);
 
         // 4. 投資結算 (含風險)
-        p.investments.forEach(inv => {
+        p.investments = p.investments.filter(inv => {
             inv.turnsLeft--;
             if (inv.turnsLeft === 0) {
-                // 結算邏輯
-                let roll = Math.random() * 100; // 0-99
+                let roll = Math.random() * 100; 
                 let resultAmt = 0;
-                
-                // 簡單風險模型：Risk 80 => 80% 機率可能有壞事，或者波動大
-                // 這裡採用：Risk 越高，波動範圍越大 (可能大賺或賠本)
-                // 基準回報 100% (保本)
-                
-                // 波動因子：Risk 0 -> +/- 5%, Risk 100 -> +/- 150%
                 let volatility = inv.risk * 1.5; 
-                let actualReturnRate = 100 + (Math.random() * volatility * 2 - volatility); 
-                // 加上 maxRoi 的一點權重
                 
-                // 簡化版：
-                // 如果 Roll < Risk/2，則虧損。否則獲利。
                 if (roll < (inv.risk / 2.5)) {
                     // 虧損事件
-                    let lossRate = randInt(10, 50 + inv.risk/2); // 虧 10% ~ 100%
+                    let lossRate = randInt(10, 50 + inv.risk/2); 
                     if (inv.risk > 80 && Math.random() < 0.2) lossRate = 150; // 爆倉負債
                     
                     let returnVal = Math.floor(inv.cost * (100 - lossRate) / 100);
-                    resultAmt = returnVal - inv.cost; // 淨利 (負數)
-                    p.cash += returnVal; // 退回剩餘本金
+                    resultAmt = returnVal - inv.cost; 
+                    p.cash += returnVal; 
                     logs.push(`<span class="log-bad">投資失利(R:${inv.risk}) 虧損 $${-resultAmt + inv.cost - returnVal}</span>`);
                 } else {
                     // 獲利
@@ -658,9 +630,10 @@ function processTurn() {
                     logs.push(`<span class="log-good">投資獲利(R:${inv.risk}) +$${totalBack - inv.cost}</span>`);
                     p.roundIncome += (totalBack - inv.cost);
                 }
+                return false; // 移除已結算投資
             }
+            return true; // 保留未結算投資
         });
-        p.investments = p.investments.filter(i => i.turnsLeft > 0);
 
         // 5. 強制支出 (十一 + 生活費)
         if (p.roundIncome > 0) {
@@ -675,14 +648,14 @@ function processTurn() {
         let interest = Math.floor(p.bank * currentRate);
         if (interest > 0) {
             p.bank += interest;
-            logs.push(`利息 +$${interest}`);
+            logs.push(`利息(${(currentRate*100).toFixed(1)}%) +$${interest}`);
         }
         p.tempRateBoost = 0;
 
         // 7. 破產處理
         if (p.cash < 0) {
             if (p.bank >= -p.cash) {
-                p.bank += p.cash; // cash is negative
+                p.bank += p.cash; 
                 p.cash = 0;
                 logs.push(`自動轉帳補赤字`);
             } else {
@@ -707,7 +680,6 @@ function processTurn() {
 }
 
 function handleGlobalEvents() {
-    // 第 5 輪後加入隨機付款事件
     if (gameState.turn > 5 && Math.random() < 0.4) {
         const bills = [
             { t: '💸 收到燃料稅單', amt: 30 },
@@ -726,8 +698,8 @@ function updateUI() {
     document.getElementById('turn-display').innerText = `第 ${gameState.turn} / ${CONFIG.maxTurns} 輪`;
     
     const phases = {
-        'p1_choice': 'A 組選擇 (請選 2 張)',
-        'p2_choice': 'B 組選擇 (請選 2 張)',
+        'p1_choice': 'A 組行動 (選 1 張)',
+        'p2_choice': 'B 組行動 (選 1 張)',
         'processing': '結算中...'
     };
     document.getElementById('phase-msg').innerText = phases[gameState.phase];
@@ -762,7 +734,9 @@ function updatePlayerUI(idx, prefix) {
 
     // 狀態描述
     let statusParts = [];
-    if (p.stableJob) statusParts.push(p.stableJob.name);
+    if (p.stableJob) {
+        statusParts.push(`${p.stableJob.name} (${p.stableJob.hours}hr/日)`);
+    }
     else statusParts.push("待業中");
     
     if (p.partTimeJobs.length > 0) statusParts.push(`兼職x${p.partTimeJobs.length}`);
@@ -796,11 +770,9 @@ function endGame() {
         </div>
     `;
     document.getElementById('cards-container').innerHTML = html;
-    document.getElementById('confirm-btn').style.display = 'none';
 }
 
 function getAssets(p) {
-    // 簡單計算：未到期的投資算 50% 價值 (急售)
     let val = 0;
     p.investments.forEach(i => val += Math.floor(i.cost * 0.5));
     return val;
