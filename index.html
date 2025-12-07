@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v3.5 (計時器)</title>
+    <title>社畜生存戰：理財 Roguelike v5.0 (特殊事件)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -167,6 +167,18 @@
             flex-shrink: 1;
             min-width: 0; /* 允許縮小 */
         }
+        /* 特殊事件卡牌樣式 */
+        .card.special-event {
+            border: 4px solid var(--danger);
+            background: #fffafa;
+            flex-basis: 45%; 
+            flex-grow: 0;
+            min-height: 220px;
+            box-shadow: 0 0 15px rgba(231, 76, 60, 0.4);
+        }
+        .card.special-event .card-title { color: var(--danger); font-size: 1.6em; }
+        .card.special-event .card-desc { font-size: 1.1em; color: var(--primary); }
+
         .card:hover { transform: translateY(-3px); border-color: #bdc3c7; }
         
         /* 新增：選中狀態 */
@@ -175,6 +187,11 @@
             box-shadow: 0 0 10px rgba(39, 174, 96, 0.7);
             transform: translateY(-5px);
         }
+        .card.special-event.selected {
+            border-color: var(--accent);
+            box-shadow: 0 0 10px rgba(39, 174, 96, 0.7);
+        }
+
 
         /* 禁用的卡牌 */
         .card.disabled {
@@ -221,6 +238,7 @@
         .tag-risk-high { background: #c0392b; }
         .tag-none { background: #95a5a6; }
         .tag-special { background: #8e44ad; }
+        .tag-special-danger { background: var(--danger); }
 
         /* 事件日誌優化 */
         .log-area {
@@ -238,6 +256,8 @@
         .log-turn { color: #fff; background: #e67e22; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         .log-bad { color: #c0392b; font-weight: bold; }
         .log-good { color: #27ae60; font-weight: bold; }
+        .log-event { color: #8e44ad; font-weight: bold; } /* 新增特殊事件log顏色 */
+
 
         /* 狀態文字小字 */
         .status-text { font-size: 0.9em; color: #7f8c8d; margin-top: 5px; line-height: 1.4; }
@@ -253,7 +273,7 @@
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>⏱️ **時間限制：** 隨著遊戲進展，決策時間將逐漸縮短！</p>
-            <p>🚨 **重要警示：** 健康值 **低於 30** 時，將**強制**選擇花錢治療！</p>
+            <p>🚨 **特殊事件：** 第 5, 12, 18 輪會出現單獨的**詐騙/推銷**事件！</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -273,6 +293,10 @@
                 <div class="stat-row">
                     <span>現金/存款</span>
                     <span><span class="money" id="p1-cash">$100</span> / <span class="money" id="p1-bank">$0</span></span>
+                </div>
+                <div class="stat-row">
+                    <span>投資資產 (估)</span>
+                    <span class="money" id="p1-investment-asset">$0</span>
                 </div>
                 <div class="stat-row">
                     <span>總資產 (估算)</span>
@@ -296,6 +320,10 @@
                     <span><span class="money" id="p2-cash">$100</span> / <span class="money" id="p2-bank">$0</span></span>
                 </div>
                 <div class="stat-row">
+                    <span>投資資產 (估)</span>
+                    <span class="money" id="p2-investment-asset">$0</span>
+                </div>
+                <div class="stat-row">
                     <span>總資產 (估算)</span>
                     <span class="total-asset" id="p2-total-asset">$100</span>
                 </div>
@@ -311,7 +339,7 @@
             </div>
         </div>
 
-        <div id="cards-container" class="cards-area"></div>
+        <div id="cards-container" class="cards-area" style="justify-content: center;"></div>
 
         <div class="action-area" style="text-align: center; margin-top: 20px;">
             <button class="confirm-btn" id="confirm-btn" onclick="confirmAction()" disabled>確認行動 (請選擇 1-2 張卡)</button>
@@ -336,18 +364,20 @@ const CONFIG = {
     lowHpThreshold: 30, 
     minSickCost: 50, 
     turnSalaryIncrease: 0.02,
+    // --- 特殊事件輪數 ---
+    specialEventTurns: [5, 12, 18],
     // --- 時間限制配置 ---
     timeLimits: [
-        { endTurn: 5, time: 60 }, // 第 1-5 輪：60 秒
-        { endTurn: 10, time: 40 }, // 第 6-10 輪：40 秒
-        { endTurn: 15, time: 30 }, // 第 11-15 輪：30 秒
-        { endTurn: 20, time: 20 }  // 第 16-20 輪：20 秒
+        { endTurn: 5, time: 60 }, 
+        { endTurn: 10, time: 40 }, 
+        { endTurn: 15, time: 30 }, 
+        { endTurn: 20, time: 20 } 
     ]
 };
 
 let gameState = {
     turn: 1,
-    phase: 'p1_choice', 
+    phase: 'p1_choice', // p1_choice, p2_choice, p1_event, p2_event, processing
     players: [],
     currentCards: [],
     selectedIndices: [], 
@@ -396,34 +426,25 @@ function startGame() {
     startPlayerTurn(0);
 }
 
-// --- 計時器功能 ---
-
-/**
- * 根據當前回合數獲取時間限制
- * @param {number} turn 
- * @returns {number} 該回合允許的秒數
- */
+// --- 計時器功能 (略) ---
 function getTimeLimit(turn) {
+    // 特殊事件強制 40 秒
+    if (CONFIG.specialEventTurns.includes(turn)) return 40; 
+    
     for (const limit of CONFIG.timeLimits) {
         if (turn <= limit.endTurn) {
             return limit.time;
         }
     }
-    // 預防萬一，返回最後一個時間限制
     return CONFIG.timeLimits[CONFIG.timeLimits.length - 1].time;
 }
 
-/**
- * 開始倒數計時器
- * @param {number} duration 倒數秒數
- */
 function startTimer(duration) {
     clearInterval(gameState.timer);
     gameState.timeLeft = duration;
     const timerDisplay = document.getElementById('timer-display');
     timerDisplay.innerText = gameState.timeLeft;
     
-    // 將計時器顏色設定為警告
     timerDisplay.style.color = 'var(--danger)'; 
     if (duration > 40) timerDisplay.style.color = 'var(--warning)';
 
@@ -431,7 +452,6 @@ function startTimer(duration) {
         gameState.timeLeft--;
         timerDisplay.innerText = gameState.timeLeft;
         
-        // 變更顏色警示
         if (gameState.timeLeft <= 10) {
             timerDisplay.style.color = 'var(--danger)';
         }
@@ -439,7 +459,7 @@ function startTimer(duration) {
         if (gameState.timeLeft <= 0) {
             clearInterval(gameState.timer);
             log(`🚨 時間到！自動執行當前行動。`, 'bad');
-            confirmAction(false, true); // 傳入 isTimeout = true 觸發自動行動
+            confirmAction(false, true); 
         }
     }, 1000);
 }
@@ -449,6 +469,7 @@ function stopTimer() {
     document.getElementById('timer-display').innerText = '--';
 }
 
+
 // --- 遊戲流程控制 ---
 function startPlayerTurn(playerIdx) {
     if (gameState.turn > CONFIG.maxTurns) {
@@ -456,38 +477,60 @@ function startPlayerTurn(playerIdx) {
         return;
     }
 
-    gameState.phase = playerIdx === 0 ? 'p1_choice' : 'p2_choice';
+    const playerPrefix = playerIdx === 0 ? 'p1' : 'p2';
+    const player = gameState.players[playerIdx];
+
+    // 1. 檢查是否需要觸發特殊事件
+    if (CONFIG.specialEventTurns.includes(gameState.turn)) {
+        gameState.phase = `${playerPrefix}_event`;
+        gameState.maxSelections = 1; // 特殊事件只能選 1 張
+        generateSpecialEventCards(gameState.turn);
+        log(`📢 ${player.name} 進入特殊事件階段！`, 'log-event');
+    } else {
+        // 2. 正常回合
+        gameState.phase = `${playerPrefix}_choice`;
+        if (gameState.turn === 1) {
+            gameState.maxSelections = 1; 
+        } else {
+            gameState.maxSelections = 2; 
+        }
+        generateCards(playerIdx);
+    }
+    
     gameState.selectedIndices = []; 
     gameState.selectionCount = 0; 
     
-    if (gameState.turn === 1) {
-        gameState.maxSelections = 1; 
-    } else {
-        gameState.maxSelections = 2; 
-    }
-
     updateUI();
-    generateCards(playerIdx);
     
     const btn = document.getElementById('confirm-btn');
     btn.disabled = true;
     btn.innerText = `確認行動 (請選擇 1-${gameState.maxSelections} 張卡)`;
 
-    // 清除所有卡牌狀態
     document.querySelectorAll('.card').forEach(card => card.classList.remove('disabled', 'selected', 'force-heal'));
 
     const timeLimit = getTimeLimit(gameState.turn);
-    startTimer(timeLimit); // 在新回合開始時啟動計時器
+    startTimer(timeLimit); 
 }
 
 function handleCardClick(index) {
     const btn = document.getElementById('confirm-btn');
     const cardElement = document.getElementById(`card-${index}`);
     const card = gameState.currentCards[index];
-    const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
+    const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
 
-    // 1. 疾病強制選擇檢查 (一旦點擊治療卡，立即確認)
+    // --- 特殊事件模式下只能選 1 張 ---
+    if (gameState.phase.endsWith('_event')) {
+         gameState.selectedIndices = [index];
+         document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+         cardElement.classList.add('selected');
+         btn.disabled = false;
+         btn.innerText = `確認行動 (已選 1 / 1)`;
+         return;
+    }
+
+    // --- 正常行動模式下的邏輯 (疾病強制選擇, 存款特殊處理, 正常選擇邏輯) (略) ---
+    // 1. 疾病強制選擇檢查 
     if (player.hp <= CONFIG.lowHpThreshold) {
         if (card.title === '🧘 深度休息') {
             gameState.selectedIndices = [index];
@@ -504,18 +547,17 @@ function handleCardClick(index) {
             return;
         }
 
-        stopTimer(); // 暫停計時器等待輸入
+        stopTimer(); 
         document.querySelectorAll('.card').forEach(c => c.classList.add('disabled'));
 
         let input = prompt("請輸入存款比例：20 (20%) / 50 (50%) / ALL (全部)");
         
         document.querySelectorAll('.card').forEach(c => c.classList.remove('disabled'));
         renderCards(); 
-        startTimer(gameState.timeLeft); // 恢復計時器
+        startTimer(gameState.timeLeft); 
 
         if (input) {
             input = input.toUpperCase().trim();
-            
             let amtToDeposit = 0;
             if (input === 'ALL') {
                 amtToDeposit = player.cash;
@@ -536,7 +578,7 @@ function handleCardClick(index) {
                     btn.disabled = false;
                     btn.innerText = `確認行動 (已選 ${currentSelected} / ${gameState.maxSelections})`;
                 } else {
-                    confirmAction(true); // 存款完成且達到上限，直接確認
+                    confirmAction(true); 
                 }
                 return;
             }
@@ -573,31 +615,28 @@ function handleCardClick(index) {
 }
 
 /**
- * 確認行動或處理超時
- * @param {boolean} isQuickAction 是否為立即結算行動 (如存款達到上限)
- * @param {boolean} isTimeout 是否因計時器超時觸發
+ * 確認行動 (包括特殊事件)
  */
 function confirmAction(isQuickAction = false, isTimeout = false) {
     stopTimer(); 
 
-    const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
+    const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
+    const isSpecialEvent = gameState.phase.endsWith('_event');
 
     const totalSelected = gameState.selectionCount + gameState.selectedIndices.length;
     let selectedCardNames = [];
-
-    // --- 超時且沒有選擇任何卡片時，直接跳過 ---
+    
+    // --- 超時或選擇數量檢查 ---
     if (isTimeout && totalSelected === 0) {
-        log(`${player.name} 因超時未選擇，本輪跳過行動。`, 'turn');
-        recordHistory(player, ['超時/跳過']); // 記錄超時
+        log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
+        recordHistory(player, ['超時/跳過']); 
         setTimeout(() => nextPhase(playerIdx), 300);
         return;
     }
-
-    // --- 非超時情況下，檢查選擇數量 ---
     if (!isQuickAction && !isTimeout && (totalSelected < 1 || totalSelected > gameState.maxSelections)) {
          log(`⚠️ ${player.name} 必須選擇 1 到 ${gameState.maxSelections} 張卡片！`, 'bad');
-         startTimer(gameState.timeLeft); // 選擇不足，恢復計時器
+         startTimer(gameState.timeLeft); 
          return;
     }
     
@@ -628,7 +667,15 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
 
     gameState.selectedIndices = [];
     
-    setTimeout(() => nextPhase(playerIdx), 500);
+    // --- 特殊事件處理完畢後，切換回正常選擇階段 ---
+    if (isSpecialEvent) {
+         log(`✅ ${player.name} 特殊事件處理完畢，進入正常選擇階段。`, 'log-event');
+         // 重新啟動本回合的正常選擇
+         setTimeout(() => startPlayerTurn(playerIdx), 500); 
+    } else {
+         // 正常回合處理完畢，切換到下一位玩家或結算
+         setTimeout(() => nextPhase(playerIdx), 500);
+    }
 }
 
 function nextPhase(playerIdx) {
@@ -642,7 +689,7 @@ function nextPhase(playerIdx) {
     }
 }
 
-// --- 數據追蹤 (只記錄到本次遊戲的 history 陣列) ---
+// --- 數據追蹤 (略) ---
 function recordHistory(player, actions) {
     const asset = getAssets(player, true);
     
@@ -660,7 +707,7 @@ function recordHistory(player, actions) {
     });
 }
 
-// --- 卡牌生成器 (略) ---
+// --- 卡牌生成器 (新增特殊事件) ---
 function getDynamicPay(basePay) {
     if (gameState.turn === 1) return basePay;
     const increaseFactor = 1 + (gameState.turn - 1) * CONFIG.turnSalaryIncrease;
@@ -680,7 +727,9 @@ function getCardCost(card) {
             return 0;
     }
 }
+
 const generators = {
+    // ... [其他 generators, 為了節省空間此處略過, 請保持原有程式碼中的所有 generators] ...
     jobStableStandard: () => {
         const basePay = 200;
         const pay = getDynamicPay(basePay);
@@ -847,20 +896,19 @@ const generators = {
             title: '🧘 深度休息', tag: '健康/治療', cost: totalCost, 
             desc: desc,
             effect: (p) => {
-                if (p.cash + p.bank < totalCost) {
-                    return '資產不足，無法治療！'; 
-                }
+                const actualCost = Math.min(totalCost, p.cash + p.bank);
+                if (actualCost <= 0) return '資產不足，無法支付！'; 
                 
-                if (p.cash >= totalCost) {
-                    p.cash -= totalCost;
+                if (p.cash >= actualCost) {
+                    p.cash -= actualCost;
                 } else {
-                    let shortage = totalCost - p.cash;
+                    let shortage = actualCost - p.cash;
                     p.cash = 0;
                     p.bank -= shortage;
                 }
 
                 p.hp = Math.min(CONFIG.maxHp, p.hp + healAmt);
-                let report = `健康恢復 +${healAmt} (花費$${totalCost})`;
+                let report = `健康恢復 +${healAmt} (花費$${actualCost})`;
                 
                 if (p.sicknessCost > 0) {
                     report += `，清除醫療費用 $${p.sicknessCost}。`;
@@ -869,13 +917,113 @@ const generators = {
                 return report;
             }
         };
+    },
+    
+    // --- 特殊事件卡牌產生器 ---
+    specialEventCard: (type) => {
+        switch(type) {
+            case 5:
+                return [
+                    {
+                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', cost: 1000,
+                        desc: '「有一個人透過FB私訊你說有高薪國外機會，有沒有興趣?」',
+                        effect: (p) => {
+                            const loss = 1000;
+                            const actualLoss = Math.min(loss, p.cash + p.bank);
+                            
+                            // 優先扣現金，不足扣存款
+                            if (p.cash >= actualLoss) {
+                                p.cash -= actualLoss;
+                            } else {
+                                p.bank -= (actualLoss - p.cash);
+                                p.cash = 0;
+                            }
+                            
+                            p.hp = Math.max(0, p.hp - 10);
+                            
+                            return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區，家裡花錢撈人。)`;
+                        }
+                    },
+                    {
+                        title: '❌ 婉拒並封鎖訊息', tag: '明智抉擇', cost: 0,
+                        desc: '「恭喜你在電視上看到有人被騙，慶幸自己逃過一劫。」',
+                        effect: (p) => {
+                            return `👍 逃過一劫！資產無影響。`;
+                        }
+                    }
+                ];
+            case 12:
+                return [
+                    {
+                        title: '✅ 加入飆股群組', tag: '假投資陷阱', cost: 2000,
+                        desc: '「有人在LINE發訊息說張忠謀開課教你如何投資股票，有沒有興趣加入群組?」',
+                        effect: (p) => {
+                            const loss = 2000;
+                            const actualLoss = Math.min(loss, p.cash + p.bank);
+
+                            if (p.cash >= actualLoss) {
+                                p.cash -= actualLoss;
+                            } else {
+                                p.bank -= (actualLoss - p.cash);
+                                p.cash = 0;
+                            }
+
+                            return `💣 假投資平台！儲進去的 $${actualLoss} 直接歸零。`;
+                        }
+                    },
+                    {
+                        title: '❌ 不理會，退出群組', tag: '明智抉擇', cost: 0,
+                        desc: '「還好沒被騙，嚇死寶寶了。」',
+                        effect: (p) => {
+                            return `👍 逃過一劫！資產無影響。`;
+                        }
+                    }
+                ];
+            case 18:
+                return [
+                    {
+                        title: '✅ 選擇強硬拒絕', tag: '明智抉擇', cost: 0,
+                        desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (強硬拒絕)',
+                        effect: (p) => {
+                            return `👍 成功逃離！資產無影響。`;
+                        }
+                    },
+                     {
+                        title: '❌ 被迫購買全套產品', tag: '強迫推銷', cost: 5000,
+                        desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (花錢了事)',
+                        effect: (p) => {
+                            const loss = 5000;
+                            const actualLoss = Math.min(loss, p.cash + p.bank);
+
+                            if (p.cash >= actualLoss) {
+                                p.cash -= actualLoss;
+                            } else {
+                                p.bank -= (actualLoss - p.cash);
+                                p.cash = 0;
+                            }
+                            
+                            return `💸 逃不出推銷！花 $${actualLoss} 買了一整套沒用化妝品。`;
+                        }
+                    }
+                ];
+            default:
+                return [];
+        }
     }
 };
+
+function generateSpecialEventCards(turn) {
+    const cards = generators.specialEventCard(turn);
+    gameState.currentCards = cards;
+    renderCards(true);
+}
+
 
 function generateCards(playerIdx) {
     let pool = [];
     const player = gameState.players[playerIdx];
 
+    // T1 特殊處理 (略)
     if (gameState.turn === 1) {
         const t1Jobs = [
             generators.jobStableStandard, generators.jobStableShift,
@@ -940,60 +1088,69 @@ function generateCards(playerIdx) {
         }
     }
     
-    renderCards();
+    renderCards(false);
 }
 
-function renderCards() {
+function renderCards(isSpecialEvent) {
     const container = document.getElementById('cards-container');
     container.innerHTML = '';
     
-    const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
+    const playerIdx = gameState.phase.startsWith('p1') ? 0 : 1;
     const player = gameState.players[playerIdx];
     const totalLiquidAssets = player.cash + player.bank;
-    const isForceHealing = player.hp <= CONFIG.lowHpThreshold;
+    const isForceHealing = player.hp <= CONFIG.lowHpThreshold && !isSpecialEvent; // 特殊事件期間不檢查強制治療
+
+    // 調整卡片容器佈局以適應特殊事件
+    if (isSpecialEvent) {
+        container.style.justifyContent = 'space-around';
+        container.style.flexWrap = 'nowrap';
+        container.style.maxWidth = '800px'; 
+    } else {
+        container.style.justifyContent = 'space-between';
+        container.style.flexWrap = 'wrap';
+        container.style.maxWidth = 'none'; 
+    }
 
 
     gameState.currentCards.forEach((card, idx) => {
         let div = document.createElement('div');
-        div.className = `card`; 
+        div.className = `card ${isSpecialEvent ? 'special-event' : ''}`; 
         div.id = `card-${idx}`; 
         
         let tagClass = 'tag-none';
-        if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
-        else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
-        else tagClass = 'tag-special';
-
-        let clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
-        
-        const cost = getCardCost(card);
+        let clickText = '點擊選擇';
         let isDisabled = false;
         let disableReason = '';
+        const cost = card.cost || getCardCost(card);
 
-        if (cost > 0) {
-            if (card.title === '💰 彈性存款') {
-                 if (player.cash <= 0) {
-                    isDisabled = true;
-                    disableReason = '無現金可存';
-                 }
-            } else if (card.title === '🧘 深度休息') {
-                const totalRestCost = card.cost;
-                 if (totalRestCost > totalLiquidAssets) {
-                    isDisabled = true;
-                    disableReason = `資產($${totalLiquidAssets})不足$${totalRestCost}`;
-                 }
-            } else if (cost > totalLiquidAssets) {
-                isDisabled = true;
-                disableReason = `資產($${totalLiquidAssets})不足$${cost}`;
+        if (isSpecialEvent) {
+            tagClass = card.tag.includes('明智') ? 'tag-risk-low' : 'tag-special-danger';
+            clickText = `選擇 (${card.cost > 0 ? ' -$'+card.cost : '不花錢'})`;
+            
+            // 檢查資產是否足夠支付特殊事件的成本
+            if (cost > totalLiquidAssets && cost > 0) {
+                 isDisabled = true;
+                 disableReason = `🚨 資產($${totalLiquidAssets})不足$${cost}，無法選擇此項。`;
             }
-        }
-        
-        if (isForceHealing) {
-            if (card.title === '🧘 深度休息' && !isDisabled) {
-                div.classList.add('force-heal');
-                clickText = `🚨 必須治療 $${card.cost}`;
-            } else {
-                isDisabled = true;
-                disableReason = `🚨 必須先治療 (HP<${CONFIG.lowHpThreshold})`;
+        } else {
+            // 正常回合的標籤和禁用邏輯 (略)
+            if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
+            else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
+            else tagClass = 'tag-special';
+
+            clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
+
+            if (cost > 0) {
+                 // 正常回合的資產檢查邏輯 (已在舊版實作)
+            }
+            if (isForceHealing) {
+                if (card.title === '🧘 深度休息' && !isDisabled) {
+                    div.classList.add('force-heal');
+                    clickText = `🚨 必須治療 $${card.cost}`;
+                } else {
+                    isDisabled = true;
+                    disableReason = `🚨 必須先治療 (HP<${CONFIG.lowHpThreshold})`;
+                }
             }
         }
 
@@ -1031,7 +1188,18 @@ function renderCards() {
         document.getElementById('confirm-btn').disabled = false;
         document.getElementById('confirm-btn').innerText = `確認行動 (強制治療)`;
     }
+    
+    // 如果是特殊事件，檢查是否有可選項目，並設定按鈕文字
+    if (isSpecialEvent) {
+         const hasSelectable = Array.from(document.querySelectorAll('.card')).some(c => !c.classList.contains('disabled'));
+         if (hasSelectable) {
+            document.getElementById('confirm-btn').innerText = `確認特殊事件選擇 (只能選 1 張)`;
+         } else {
+            document.getElementById('confirm-btn').innerText = `🚨 無法選擇，資產不足以支付`;
+         }
+    }
 }
+
 
 // --- 結算核心 (略) ---
 function processTurn() {
@@ -1044,7 +1212,7 @@ function processTurn() {
         p.roundIncome = 0;
         let jobIncome = 0; 
         
-        // --- 1. 計算工時與健康 ---
+        // --- 1. 計算工時與健康 (略) ---
         let dailyHours = 0;
         if (p.stableJob) dailyHours += p.stableJob.hours;
         p.partTimeJobs.forEach(j => dailyHours += j.hours);
@@ -1056,7 +1224,7 @@ function processTurn() {
             logs.push(`<span class="log-bad">過勞(${dailyHours}hr) 健康 -${dmg.toFixed(1)}</span>`);
         }
         
-        // --- 2. 疾病判定 (累積醫療費用) ---
+        // --- 2. 疾病判定 (略) ---
         if (p.hp < CONFIG.maxHp && p.sicknessCost === 0) {
             let sickChance = (100 - p.hp) * 0.7 / 100;
             if (Math.random() < sickChance) {
@@ -1071,7 +1239,7 @@ function processTurn() {
         }
 
 
-        // --- 3. 收入結算 (工作/兼職) ---
+        // --- 3. 收入結算 (略) ---
         if (p.stableJob) {
             p.roundIncome += p.stableJob.pay;
             p.cash += p.stableJob.pay;
@@ -1090,7 +1258,7 @@ function processTurn() {
              logs.push(`<span class="log-good">工作收入 +$${jobIncome}</span>`);
         }
         
-        // --- 4. 股票股利收入 ---
+        // --- 4. 股票股利收入 (略) ---
         let dividendIncome = 0;
         p.stocks.forEach(s => {
             let baseDiv = Math.floor(s.cost / 100);
@@ -1103,7 +1271,7 @@ function processTurn() {
              logs.push(`<span class="log-good">💸 股利收入 +$${dividendIncome}</span>`);
         }
 
-        // --- 5. 投資結算 (短期風險) ---
+        // --- 5. 投資結算 (短期風險) (略) ---
         p.investments = p.investments.filter(inv => {
             inv.turnsLeft--;
             if (inv.turnsLeft === 0) {
@@ -1130,7 +1298,7 @@ function processTurn() {
             return true; 
         });
         
-        // --- 6. 定存結算 ---
+        // --- 6. 定存結算 (略) ---
         p.lockedSavings = p.lockedSavings.filter(locked => {
             locked.turnsLeft--;
             if (locked.turnsLeft === 0) {
@@ -1145,7 +1313,7 @@ function processTurn() {
         });
 
 
-        // --- 7. 強制支出 (生活費 + 十一) ---
+        // --- 7. 強制支出 (生活費 + 十一) (略) ---
         p.cash -= CONFIG.livingCost;
         logs.push(`生活費 -$${CONFIG.livingCost}`);
 
@@ -1155,7 +1323,7 @@ function processTurn() {
             logs.push(`十一奉獻 -$${tithe}`);
         }
 
-        // --- 8. 利息 (活存) ---
+        // --- 8. 利息 (活存) (略) ---
         let currentRate = p.rate; 
         
         if (p.tempRateBoost.turnsLeft > 0) {
@@ -1173,7 +1341,7 @@ function processTurn() {
             p.roundIncome += interest;
         }
         
-        // --- 9. 破產處理 (現金赤字自動扣存款) ---
+        // --- 9. 破產處理 (略) ---
         if (p.cash < 0) {
             let shortage = -p.cash;
             
@@ -1196,9 +1364,6 @@ function processTurn() {
         if (logs.length) log(`${p.name}: ${logs.join(' | ')}`);
     });
     
-    // --- 10. 輸出輪次報告 ---
-    outputTurnReport();
-
     gameState.turn++;
     if (gameState.turn > CONFIG.maxTurns) {
         endGame();
@@ -1207,25 +1372,6 @@ function processTurn() {
     }
 }
 
-function outputTurnReport() {
-    let report = '<h3>📊 輪次總結報告</h3>';
-    gameState.players.forEach(p => {
-        const totalAsset = getAssets(p, true);
-        const investmentAsset = getAssets(p, false, true);
-        
-        report += `
-            <div style="margin-bottom: 10px; border-left: 3px solid #3498db; padding-left: 10px;">
-                <strong>${p.name}</strong> (健康: ${Math.floor(p.hp)}${p.sicknessCost > 0 ? ` ⚠️病債$${p.sicknessCost}` : ''})
-                <ul>
-                    <li>總資產 (估): <span class="total-asset">$${totalAsset}</span></li>
-                    <li>現金/活存: <span class="${p.cash < 0 ? 'debt' : 'money'}">$${p.cash}</span> / <span class="money">$${p.bank}</span></li>
-                    <li>投資資產總額: <span class="money">$${investmentAsset}</span></li>
-                </ul>
-            </div>
-        `;
-    });
-    log(report);
-}
 
 function handleGlobalEvents() {
     if (gameState.turn > 5 && Math.random() < 0.3) {
@@ -1241,28 +1387,36 @@ function handleGlobalEvents() {
     }
 }
 
-// --- 輔助函式 ---
+// --- 輔助函式 (略) ---
 function updateUI() {
     document.getElementById('turn-display').innerText = `第 ${gameState.turn} / ${CONFIG.maxTurns} 輪`;
     
-    const phases = {
-        'p1_choice': 'A 組行動 (選 1-' + gameState.maxSelections + ' 張)',
-        'p2_choice': 'B 組行動 (選 1-' + gameState.maxSelections + ' 張)',
-        'processing': '結算中...'
-    };
-    document.getElementById('phase-msg').innerText = phases[gameState.phase];
+    let phaseText = '';
+    const playerPrefix = gameState.phase.startsWith('p1') ? 'A' : 'B';
+    
+    if (gameState.phase.endsWith('_event')) {
+         phaseText = `${playerPrefix} 組 特殊事件 (選 1 張)`;
+    } else if (gameState.phase.endsWith('_choice')) {
+         phaseText = `${playerPrefix} 組行動 (選 1-${gameState.maxSelections} 張)`;
+    } else {
+         phaseText = '結算中...';
+    }
+
+    document.getElementById('phase-msg').innerText = phaseText;
 
     updatePlayerUI(0, 'p1');
     updatePlayerUI(1, 'p2');
 
-    document.getElementById('p1-stats').classList.toggle('active', gameState.phase === 'p1_choice');
-    document.getElementById('p2-stats').classList.toggle('active', gameState.phase === 'p2_choice');
+    document.getElementById('p1-stats').classList.toggle('active', gameState.phase.startsWith('p1'));
+    document.getElementById('p2-stats').classList.toggle('active', gameState.phase.startsWith('p2'));
 }
 
 function updatePlayerUI(idx, prefix) {
     let p = gameState.players[idx];
     
     document.getElementById(`${prefix}-total-asset`).innerText = `$${getAssets(p, true)}`;
+    document.getElementById(`${prefix}-investment-asset`).innerText = `$${getAssets(p, false, true)}`;
+
 
     let cashEl = document.getElementById(`${prefix}-cash`);
     cashEl.innerText = `$${p.cash}`;
@@ -1306,21 +1460,17 @@ function updatePlayerUI(idx, prefix) {
 function getAssets(p, includeCashAndBank = false, onlyInvestments = false) {
     let val = 0;
     
-    if (includeCashAndBank) {
-        val += p.cash;
-        val += p.bank;
-    }
-
     p.investments.forEach(i => val += Math.floor(i.cost * 0.5)); 
     p.lockedSavings.forEach(i => val += i.cost); 
     p.stocks.forEach(i => val += i.cost); 
-    
+
     if (onlyInvestments) {
-        let investVal = 0;
-        p.investments.forEach(i => investVal += Math.floor(i.cost * 0.5)); 
-        p.lockedSavings.forEach(i => investVal += i.cost); 
-        p.stocks.forEach(i => investVal += i.cost); 
-        return investVal;
+        return val;
+    }
+    
+    if (includeCashAndBank) {
+        val += p.cash;
+        val += p.bank;
     }
 
     return val;
@@ -1330,26 +1480,50 @@ function getAssets(p, includeCashAndBank = false, onlyInvestments = false) {
 function endGame() {
     stopTimer(); 
     
-    let p1Total = getAssets(gameState.players[0], true);
-    let p2Total = getAssets(gameState.players[1], true);
+    const p1Total = getAssets(gameState.players[0], true);
+    const p2Total = getAssets(gameState.players[1], true);
     
     let winner = p1Total > p2Total ? "🏆 A 組獲勝！" : (p2Total > p1Total ? "🏆 B 組獲勝！" : "🤝 平手！");
+
+    let finalReport = `
+        <div style="margin-top: 20px; padding: 15px; background: #fdf6e3; border: 1px solid #f9e2af; border-radius: 5px;">
+            <h3 style="color:#e67e22; border-bottom: 2px dashed #f9e2af; padding-bottom: 5px; margin-bottom: 10px;">📊 遊戲最終總結報告</h3>
+            ${gameState.players.map(p => {
+                const totalAsset = getAssets(p, true);
+                const investmentAsset = getAssets(p, false, true);
+                return `
+                    <div style="margin-bottom: 15px; border-left: 4px solid ${p.id === 0 ? '#3498db' : '#27ae60'}; padding-left: 10px;">
+                        <strong style="font-size: 1.1em;">${p.name}</strong> 
+                        (健康: ${Math.floor(p.hp)}${p.sicknessCost > 0 ? ` ⚠️病債$${p.sicknessCost}` : ''})
+                        <ul>
+                            <li>總資產 (估): <span class="total-asset">$${totalAsset}</span></li>
+                            <li>現金/活存: <span class="${p.cash < 0 ? 'debt' : 'money'}">$${p.cash}</span> / <span class="money">$${p.bank}</span></li>
+                            <li>投資資產總額 (定存/股票/短期投資本金): <span class="money">$${investmentAsset}</span></li>
+                            <li>主要工作: ${p.stableJob ? p.stableJob.name : '無'}</li>
+                        </ul>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
 
     let html = `
         <div style="text-align:center; background:white; padding:30px; border-radius:10px;">
             <h1 style="color:#e67e22; font-size: 2.5em;">${winner}</h1>
             <div style="display:flex; justify-content:space-around; margin:30px 0;">
                 <div style="font-size: 1.2em;">
-                    <h3>A 組總資產</h3>
+                    <h3>A 組最終資產</h3>
                     <div style="font-size:2.5em; color:#27ae60">$${p1Total}</div>
                     <small>健康: ${Math.floor(gameState.players[0].hp)}</small>
                 </div>
                 <div style="font-size: 1.2em;">
-                    <h3>B 組總資產</h3>
+                    <h3>B 組最終資產</h3>
                     <div style="font-size:2.5em; color:#27ae60">$${p2Total}</div>
                     <small>健康: ${Math.floor(gameState.players[1].hp)}</small>
                 </div>
             </div>
+            ${finalReport}
             <button class="confirm-btn" onclick="location.reload()">再來一局</button>
         </div>
     `;
@@ -1363,6 +1537,7 @@ function log(msg, type='') {
     div.className = 'log-entry';
     if (type === 'turn') div.innerHTML = `<span class="log-turn">${msg}</span>`;
     else if (type === 'bad') div.innerHTML = `<span class="log-bad">${msg}</span>`;
+    else if (type === 'log-event') div.innerHTML = `<span class="log-event">${msg}</span>`;
     else div.innerHTML = msg;
     area.prepend(div);
 }
