@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.8 (隱藏詐騙損失)</title>
+    <title>社畜生存戰：理財 Roguelike v5.9 (前期低成本股票與低詐騙率)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -271,6 +271,7 @@
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>⏱️ **時間限制：** 隨著遊戲進展，決策時間將逐漸縮短！</p>
             <p>🚨 **高風險卡片：** 隨機出現**詐騙/高風險投資**卡片！ (金額已隱藏)</p>
+            <p style="color: #c0392b;">**版本更新 v5.9：** 前期股票投資成本降低；詐騙卡出現機率降低。</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -361,8 +362,6 @@ const CONFIG = {
     lowHpThreshold: 30, 
     minSickCost: 50, 
     turnSalaryIncrease: 0.02,
-    // --- 移除特殊事件輪數 ---
-    // specialEventTurns: [5, 12, 18],
     // --- 時間限制配置 ---
     timeLimits: [
         { endTurn: 5, time: 60 }, 
@@ -739,8 +738,7 @@ function getDynamicPay(basePay) {
     return Math.floor(basePay * increaseFactor / 10) * 10;
 }
 function getCardCost(card) {
-    // 詐騙卡的成本 now 儲存在 card.scamCost 屬性中，不讓 UI 顯示成本
-    // 關鍵修改：如果 card.scamCost 存在，則 cost 永遠為 0
+    // 詐騙卡的成本 now 儲存在 card.scamCost 屬性中，不讓 UI 顯示 cost
     if (card.scamCost !== undefined) return 0; 
     
     // 如果卡片本身已經定義了 cost，則使用它
@@ -910,7 +908,14 @@ const generators = {
         };
     },
     investStock: () => {
-        const cost = randInt(300, 500);
+        // --- 調整邏輯：前期 (T1~T4) 降低成本 ---
+        let cost;
+        if (gameState.turn <= 4) {
+            cost = randInt(100, 250); // 前期低成本
+        } else {
+            cost = randInt(300, 500); // 後期恢復原成本
+        }
+        
         const turnsLeft = CONFIG.maxTurns - gameState.turn;
         const avgDiv = 12;
         const estimatedProfit = turnsLeft > 0 ? turnsLeft * avgDiv * Math.floor(cost / 100) : 0;
@@ -1028,7 +1033,7 @@ function generateCards(playerIdx) {
             ...(gameState.turn <= CONFIG.maxTurns - 5 ? [generators.jobStableOvertime] : []) 
         ];
 
-        // 正常卡池：加入詐騙卡
+        // 正常卡池
         pool = [
             ...jobPool,
             generators.jobPartTime, generators.jobPartTime,
@@ -1036,8 +1041,11 @@ function generateCards(playerIdx) {
             generators.depositFlexible, generators.rateBoostLong, generators.depositFixed,
             generators.invest, generators.invest, generators.invest,
             generators.investStock,
-            generators.scamCrypto, generators.scamSocial, generators.scamInsurance, // 詐騙卡片
-            () => generators.rest(player), () => generators.rest(player)
+            // --- 詐騙卡片：將其加入兩次，以降低相對出現機率 ---
+            // 正常卡片的數量約 15 張，加入 3 張詐騙卡 (15:3 = 5:1)。現在加入 6 張非詐騙卡，稀釋機率。
+            generators.depositFlexible, generators.bonusCash, generators.financialSeminar,
+            generators.rateBoostLong, generators.depositFixed, generators.invest, 
+            generators.scamCrypto, generators.scamSocial, generators.scamInsurance, 
         ]; 
 
         let uniqueDeck = [];
