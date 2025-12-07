@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.0 (特殊事件)</title>
+    <title>社畜生存戰：理財 Roguelike v5.3 (特殊事件)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -481,11 +481,15 @@ function startPlayerTurn(playerIdx) {
     const player = gameState.players[playerIdx];
 
     // 1. 檢查是否需要觸發特殊事件
-    if (CONFIG.specialEventTurns.includes(gameState.turn)) {
+    // 只有在進入新的一輪 (turn) 時，且前一階段不是特殊事件處理完畢時，才檢查特殊事件
+    const isNewTurnStart = playerIdx === 0;
+    const isSpecialEventTriggered = CONFIG.specialEventTurns.includes(gameState.turn) && isNewTurnStart;
+    
+    if (isSpecialEventTriggered && !gameState.phase.endsWith('_choice')) {
         gameState.phase = `${playerPrefix}_event`;
         gameState.maxSelections = 1; // 特殊事件只能選 1 張
         generateSpecialEventCards(gameState.turn);
-        log(`📢 ${player.name} 進入特殊事件階段！`, 'log-event');
+        log(`📢 ${player.name} 進入特殊事件階段！ (T${gameState.turn})`, 'log-event');
     } else {
         // 2. 正常回合
         gameState.phase = `${playerPrefix}_choice`;
@@ -498,7 +502,10 @@ function startPlayerTurn(playerIdx) {
     }
     
     gameState.selectedIndices = []; 
-    gameState.selectionCount = 0; 
+    // 重置已完成的 Quick Actions 數量 (如存款)
+    if (gameState.phase.endsWith('_choice')) {
+         gameState.selectionCount = 0; 
+    }
     
     updateUI();
     
@@ -529,7 +536,7 @@ function handleCardClick(index) {
          return;
     }
 
-    // --- 正常行動模式下的邏輯 (疾病強制選擇, 存款特殊處理, 正常選擇邏輯) (略) ---
+    // --- 正常行動模式下的邏輯 (疾病強制選擇, 存款特殊處理, 正常選擇邏輯) ---
     // 1. 疾病強制選擇檢查 
     if (player.hp <= CONFIG.lowHpThreshold) {
         if (card.title === '🧘 深度休息') {
@@ -629,24 +636,31 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
     
     // --- 超時或選擇數量檢查 ---
     if (isTimeout && totalSelected === 0) {
-        log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
-        recordHistory(player, ['超時/跳過']); 
-        
+        // 特殊事件超時處理
         if (isSpecialEvent) {
-            // 特殊事件超時，視為選擇了「否」選項 (如果存在)
-            const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
+             const fallbackOption = gameState.currentCards.find(c => c.title.includes('婉拒') || c.title.includes('強硬拒絕') || c.title.includes('不理會'));
             if (fallbackOption) {
                 fallbackOption.effect(player);
+                selectedCardNames.push(fallbackOption.title);
                 log(`🚨 超時，特殊事件自動選擇「${fallbackOption.title}」。`, 'log-event');
             } else {
                 log(`🚨 超時，特殊事件無默認選項，資產無影響。`, 'log-event');
+                selectedCardNames.push('特殊事件超時/跳過');
             }
-            setTimeout(() => startPlayerTurn(playerIdx), 300); // 特殊事件超時後，回到正常階段
+             recordHistory(player, selectedCardNames);
+             // 特殊事件超時，回到正常階段
+             log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
+             setTimeout(() => startPlayerTurn(playerIdx), 500); 
+             return;
         } else {
-            setTimeout(() => nextPhase(playerIdx), 300); // 正常回合超時後，切換到下一位玩家
+             // 正常回合超時處理
+             log(`${player.name} 因超時未選擇，本輪行動跳過。`, 'turn');
+             recordHistory(player, ['超時/跳過']); 
+             setTimeout(() => nextPhase(playerIdx), 500); // 正常回合超時後，切換到下一位玩家
+             return;
         }
-        return;
     }
+
     if (!isQuickAction && !isTimeout && (totalSelected < 1 || totalSelected > gameState.maxSelections)) {
          log(`⚠️ ${player.name} 必須選擇 1 到 ${gameState.maxSelections} 張卡片！`, 'bad');
          startTimer(gameState.timeLeft); 
@@ -683,7 +697,8 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
     // --- 特殊事件處理完畢後，**回到正常選擇階段** (在同一輪) ---
     if (isSpecialEvent) {
          log(`✅ ${player.name} 特殊事件處理完畢，進入本輪正常選擇階段。`, 'log-event');
-         // 重新啟動本回合的正常選擇 (關鍵修正點)
+         // 設置為 choice，並重新啟動本回合的選擇 (關鍵修正點)
+         gameState.phase = `${playerIdx === 0 ? 'p1' : 'p2'}_choice`;
          setTimeout(() => startPlayerTurn(playerIdx), 500); 
     } else {
          // 正常回合處理完畢，切換到下一位玩家或結算
@@ -692,13 +707,6 @@ function confirmAction(isQuickAction = false, isTimeout = false) {
 }
 
 function nextPhase(playerIdx) {
-    // 檢查是否已達到最大選擇次數 (針對正常選擇階段)
-    if (gameState.phase.endsWith('_choice') && gameState.selectionCount < gameState.maxSelections) {
-        log(`⚠️ ${gameState.players[playerIdx].name} 尚未完成選擇，剩餘 ${gameState.maxSelections - gameState.selectionCount} 次選擇機會。`, 'bad');
-        // 如果玩家主動按確認但未選滿，提示後重新啟動計時器 (如果不是 QuickAction 執行，這個檢查會在 confirmAction 內處理)
-        // 為了簡單起見，如果到達這裡，代表行動已完成，直接進入下一階段
-    }
-
     if (playerIdx === 0) {
         // 從 A 組 (0) 切換到 B 組 (1)
         startPlayerTurn(1); 
@@ -736,6 +744,9 @@ function getDynamicPay(basePay) {
     return Math.floor(basePay * increaseFactor / 10) * 10;
 }
 function getCardCost(card) {
+    // 特殊事件的成本現在儲存在 card.loss 屬性中
+    if (card.loss !== undefined) return 0; // 避免在 UI 上顯示詐騙成本
+    
     switch(card.title) {
         case '🔒 定期存款':
         case '🏦 藍籌股投資':
@@ -751,7 +762,6 @@ function getCardCost(card) {
 }
 
 const generators = {
-    // ... [其他 generators, 為了節省空間此處略過, 請保持原有程式碼中的所有 generators] ...
     jobStableStandard: () => {
         const basePay = 200;
         const pay = getDynamicPay(basePay);
@@ -942,12 +952,11 @@ const generators = {
     },
     
     // --- 特殊事件卡牌產生器 ---
-    // --- 特殊事件卡牌產生器 ---
     specialEventCard: (type) => {
+        // 集中處理資產扣除邏輯，允許負債
         const applyLoss = (p, loss) => {
             let actualLoss = loss;
             
-            // 優先扣除現金
             if (p.cash >= actualLoss) {
                 p.cash -= actualLoss;
             } else {
@@ -963,8 +972,8 @@ const generators = {
             case 5:
                 return [
                     {
-                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000,
-                        desc: '「有一個人透過FB私訊你說有高薪國外機會，你有沒有興趣?」',
+                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000, // 實際損失儲存在 loss 屬性
+                        desc: '有一個人透過FB私訊你說有高薪國外機會，你有沒有興趣? (損失 $1000 並降低健康)',
                         effect: (p) => {
                             const loss = 1000;
                             const actualLoss = applyLoss(p, loss);
@@ -975,7 +984,7 @@ const generators = {
                     },
                     {
                         title: '❌ 婉拒並封鎖訊息', tag: '明智抉擇', loss: 0,
-                        desc: '「恭喜你在電視上看到有人被騙，慶幸自己逃過一劫。」',
+                        desc: '恭喜你在電視上看到有人被騙，慶幸自己逃過一劫。',
                         effect: (p) => {
                             return `👍 逃過一劫！資產無影響。`;
                         }
@@ -985,7 +994,7 @@ const generators = {
                 return [
                     {
                         title: '✅ 加入飆股群組', tag: '假投資陷阱', loss: 2000,
-                        desc: '「有人在LINE發訊息說張忠謀開課教你如何投資股票，帶你飆股，有沒有興趣加入群組?」',
+                        desc: '有人在LINE發訊息說張忠謀開課教你如何投資股票，帶你飆股，有沒有興趣加入群組? (損失 $2000)',
                         effect: (p) => {
                             const loss = 2000;
                             const actualLoss = applyLoss(p, loss);
@@ -995,7 +1004,7 @@ const generators = {
                     },
                     {
                         title: '❌ 不理會，退出群組', tag: '明智抉擇', loss: 0,
-                        desc: '「還好沒被騙，嚇死寶寶了。」',
+                        desc: '還好沒被騙，嚇死寶寶了。',
                         effect: (p) => {
                             return `👍 逃過一劫！資產無影響。`;
                         }
@@ -1005,14 +1014,14 @@ const generators = {
                 return [
                     {
                         title: '✅ 選擇強硬拒絕', tag: '明智抉擇', loss: 0,
-                        desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (強硬拒絕)',
+                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (強硬拒絕)',
                         effect: (p) => {
                             return `👍 成功逃離！資產無影響。`;
                         }
                     },
                      {
                         title: '❌ 被迫購買全套產品', tag: '強迫推銷', loss: 5000,
-                        desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (花錢了事)',
+                        desc: '有人在路上拉著你說要去試用化妝品，試用不用錢... (損失 $5000)',
                         effect: (p) => {
                             const loss = 5000;
                             const actualLoss = applyLoss(p, loss);
@@ -1136,11 +1145,13 @@ function renderCards(isSpecialEvent) {
         let clickText = '點擊選擇';
         let isDisabled = false;
         let disableReason = '';
-        const cost = card.cost || getCardCost(card);
+        const cost = card.cost || getCardCost(card); // 正常卡片成本
 
         if (isSpecialEvent) {
+            // 特殊事件，不顯示成本，不檢查資產
             tagClass = card.tag.includes('明智') ? 'tag-risk-low' : 'tag-special-danger';
-            clickText = `選擇 (${card.cost > 0 ? ' -$'+card.cost : '不花錢'})`;
+            clickText = `選擇 (結果將直接影響資產)`;
+            // isDisabled 保持為 false
         } else {
             // 正常回合的標籤和禁用邏輯 (略)
             if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
@@ -1149,9 +1160,11 @@ function renderCards(isSpecialEvent) {
 
             clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
 
-            if (cost > 0) {
-                 // 正常回合的資產檢查邏輯 (已在舊版實作)
+            if (cost > totalLiquidAssets && cost > 0) {
+                 isDisabled = true;
+                 disableReason = `🚨 資產($${totalLiquidAssets})不足$${cost}，無法選擇此項。`;
             }
+
             if (isForceHealing) {
                 if (card.title === '🧘 深度休息' && !isDisabled) {
                     div.classList.add('force-heal');
@@ -1200,12 +1213,9 @@ function renderCards(isSpecialEvent) {
     
     // 如果是特殊事件，檢查是否有可選項目，並設定按鈕文字
     if (isSpecialEvent) {
-         const hasSelectable = Array.from(document.querySelectorAll('.card')).some(c => !c.classList.contains('disabled'));
-         if (hasSelectable) {
-            document.getElementById('confirm-btn').innerText = `確認特殊事件選擇 (只能選 1 張)`;
-         } else {
-            document.getElementById('confirm-btn').innerText = `🚨 無法選擇，資產不足以支付`;
-         }
+         // 特殊事件一定可選，不檢查資產
+         document.getElementById('confirm-btn').disabled = false;
+         document.getElementById('confirm-btn').innerText = `確認特殊事件選擇 (只能選 1 張)`;
     }
 }
 
@@ -1323,50 +1333,44 @@ function processTurn() {
 
 
         // --- 7. 強制支出 (生活費 + 十一) (略) ---
-        p.cash -= CONFIG.livingCost;
-        logs.push(`生活費 -$${CONFIG.livingCost}`);
-
+        let totalObligation = CONFIG.livingCost;
         if (p.roundIncome > 0) {
-            let tithe = Math.floor(p.roundIncome * CONFIG.titheRate);
-            p.cash -= tithe;
-            logs.push(`十一奉獻 -$${tithe}`);
+            totalObligation += Math.floor(p.roundIncome * CONFIG.titheRate);
+        }
+        
+        let actualPayment = Math.min(totalObligation, p.cash + p.bank);
+
+        if (p.cash >= actualPayment) {
+            p.cash -= actualPayment;
+        } else {
+            let shortage = actualPayment - p.cash;
+            p.cash = 0;
+            p.bank -= shortage;
         }
 
-        // --- 8. 利息 (活存) (略) ---
-        let currentRate = p.rate; 
+        logs.push(`生活費 + 奉獻 -$${totalObligation}`);
+        
+        // --- 8. 利息 (活存) ---
+        let currentRate = CONFIG.baseRate; 
         
         if (p.tempRateBoost.turnsLeft > 0) {
             currentRate = CONFIG.baseRate + p.tempRateBoost.amount;
             p.tempRateBoost.turnsLeft--; 
         } else {
             p.tempRateBoost.amount = 0; 
-            currentRate = CONFIG.baseRate;
-        }
-
-        let interest = Math.floor(p.bank * currentRate);
-        if (interest > 0) {
-            p.bank += interest;
-            logs.push(`活存利息(${(currentRate*100).toFixed(1)}%) <span class="log-good">+$${interest}</span>`);
-            p.roundIncome += interest;
         }
         
-        // --- 9. 破產處理 (略) ---
-        if (p.cash < 0) {
-            let shortage = -p.cash;
-            
-            if (p.bank >= shortage) {
-                p.bank -= shortage; 
-                p.cash = 0;
-                logs.push(`<span class="log-bad">存款自動轉帳補足 -$${shortage}</span>`);
-            } else {
-                let remainingShortage = shortage - p.bank;
-                let originalBank = p.bank;
-                p.bank = 0;
-                p.cash = -remainingShortage;
-                logs.push(`<span class="log-bad">🚨 存款($${originalBank})耗盡，產生負債 $${remainingShortage}</span>`);
+        // 只有存款為正時才計算利息
+        if (p.bank > 0) {
+            let interest = Math.floor(p.bank * currentRate);
+            if (interest > 0) {
+                p.bank += interest;
+                logs.push(`活存利息(${(currentRate*100).toFixed(1)}%) <span class="log-good">+$${interest}</span>`);
+                p.roundIncome += interest;
             }
         }
         
+        // --- 9. 破產/負債處理 (已在特殊事件中處理，此處確保 cash/bank UI 顯示正確) ---
         if (p.hp < 0) p.hp = 0;
         if (p.hp > CONFIG.maxHp) p.hp = CONFIG.maxHp;
 
@@ -1392,7 +1396,16 @@ function handleGlobalEvents() {
         ];
         let bill = bills[randInt(0, bills.length-1)];
         log(`[帳單] ${bill.t} -$${bill.amt}`, 'event');
-        gameState.players.forEach(p => p.cash -= bill.amt);
+        gameState.players.forEach(p => {
+            // 賬單也應允許負資產
+            if (p.cash >= bill.amt) {
+                 p.cash -= bill.amt;
+            } else {
+                 let shortage = bill.amt - p.cash;
+                 p.cash = 0;
+                 p.bank -= shortage;
+            }
+        });
     }
 }
 
@@ -1423,6 +1436,7 @@ function updateUI() {
 function updatePlayerUI(idx, prefix) {
     let p = gameState.players[idx];
     
+    // 總資產計算包括負的現金/存款
     document.getElementById(`${prefix}-total-asset`).innerText = `$${getAssets(p, true)}`;
     document.getElementById(`${prefix}-investment-asset`).innerText = `$${getAssets(p, false, true)}`;
 
@@ -1430,7 +1444,11 @@ function updatePlayerUI(idx, prefix) {
     let cashEl = document.getElementById(`${prefix}-cash`);
     cashEl.innerText = `$${p.cash}`;
     cashEl.className = p.cash < 0 ? 'money debt' : 'money';
-    document.getElementById(`${prefix}-bank`).innerText = `$${p.bank}`;
+    
+    let bankEl = document.getElementById(`${prefix}-bank`);
+    bankEl.innerText = `$${p.bank}`;
+    bankEl.className = p.bank < 0 ? 'money debt' : 'money'; // 顯示負債
+
     
     let hpText = Math.floor(p.hp);
     if (p.sicknessCost > 0) hpText += ` (病債$${p.sicknessCost})`;
@@ -1506,7 +1524,7 @@ function endGame() {
                         (健康: ${Math.floor(p.hp)}${p.sicknessCost > 0 ? ` ⚠️病債$${p.sicknessCost}` : ''})
                         <ul>
                             <li>總資產 (估): <span class="total-asset">$${totalAsset}</span></li>
-                            <li>現金/活存: <span class="${p.cash < 0 ? 'debt' : 'money'}">$${p.cash}</span> / <span class="money">$${p.bank}</span></li>
+                            <li>現金/活存: <span class="${p.cash < 0 ? 'debt' : 'money'}">$${p.cash}</span> / <span class="${p.bank < 0 ? 'debt' : 'money'}">$${p.bank}</span></li>
                             <li>投資資產總額 (定存/股票/短期投資本金): <span class="money">$${investmentAsset}</span></li>
                             <li>主要工作: ${p.stableJob ? p.stableJob.name : '無'}</li>
                         </ul>
