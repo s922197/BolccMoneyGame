@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v5.7 (隨機事件強化)</title>
+    <title>社畜生存戰：理財 Roguelike v5.8 (隱藏詐騙損失)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -270,7 +270,7 @@
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
             <p>✅ <b>規則：</b>每輪從 5 個選項中**選擇 1 或 2 個**執行</p>
             <p>⏱️ **時間限制：** 隨著遊戲進展，決策時間將逐漸縮短！</p>
-            <p>🚨 **高風險卡片：** 隨機出現**詐騙/高風險投資**卡片！</p>
+            <p>🚨 **高風險卡片：** 隨機出現**詐騙/高風險投資**卡片！ (金額已隱藏)</p>
         </div>
         <br><br>
         <button class="confirm-btn" onclick="startGame()">開始對抗</button>
@@ -740,6 +740,7 @@ function getDynamicPay(basePay) {
 }
 function getCardCost(card) {
     // 詐騙卡的成本 now 儲存在 card.scamCost 屬性中，不讓 UI 顯示成本
+    // 關鍵修改：如果 card.scamCost 存在，則 cost 永遠為 0
     if (card.scamCost !== undefined) return 0; 
     
     // 如果卡片本身已經定義了 cost，則使用它
@@ -962,32 +963,38 @@ const generators = {
         };
     },
     
-    // --- 新增：詐騙/高風險卡片生成器 ---
+    // --- 詐騙/高風險卡片生成器 (已移除金額顯示) ---
     scamCrypto: () => ({
-        title: '💥 飆升幣投資', tag: '詐騙陷阱', scamCost: 2000, 
-        desc: '加入 LINE 群組，號稱投資虛擬貨幣一週翻倍，誘惑你投入大額資金。 (強制損失 $2000)',
-        effect: (p) => {
-            const loss = 2000;
+        title: '💥 飆升幣投資', tag: '詐騙陷阱', 
+        cost: 0, // 確保 UI 不顯示 cost
+        scamCost: 2000, // 內部損失金額
+        desc: '加入 LINE 群組，號稱投資虛擬貨幣一週翻倍，誘惑你投入**大量資金**。',
+        effect: (p, card) => {
+            const loss = card.scamCost; // 使用內部損失金額
             const actualLoss = applyLoss(p, loss);
             p.hp = Math.max(0, p.hp - 5);
             return `💣 假投資平台！投入的 $${actualLoss} 歸零。健康 -5。`;
         }
     }),
     scamSocial: () => ({
-        title: '❌ 國外高薪機會', tag: '詐騙陷阱', scamCost: 1000, 
-        desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (強制損失 $1000)',
-        effect: (p) => {
-            const loss = 1000;
+        title: '❌ 國外高薪機會', tag: '詐騙陷阱', 
+        cost: 0, // 確保 UI 不顯示 cost
+        scamCost: 1000, // 內部損失金額
+        desc: '有人透過FB私訊你有高薪國外機會，你是否相信？ (損失**一筆資金**)',
+        effect: (p, card) => {
+            const loss = card.scamCost; // 使用內部損失金額
             const actualLoss = applyLoss(p, loss);
             p.hp = Math.max(0, p.hp - 10);
             return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區)。`;
         }
     }),
     scamInsurance: () => ({
-        title: '💸 高報酬保單', tag: '強迫推銷', scamCost: 5000, 
-        desc: '親戚推銷高報酬保單，強調儲蓄功能。你是否購買？ (強制損失 $5000)',
-        effect: (p) => {
-            const loss = 5000;
+        title: '💸 高報酬保單', tag: '強迫推銷', 
+        cost: 0, // 確保 UI 不顯示 cost
+        scamCost: 5000, // 內部損失金額
+        desc: '親戚推銷高報酬保單，強調儲蓄功能。你是否購買？ (**大額支出**)',
+        effect: (p, card) => {
+            const loss = card.scamCost; // 使用內部損失金額
             const actualLoss = applyLoss(p, loss);
             return `💸 被強迫推銷！損失 $${actualLoss} 買了一整套超貴保單。`;
         }
@@ -1100,7 +1107,7 @@ function renderCards(isSpecialEvent) {
         // 標籤和禁用邏輯
         if (isScam) {
             tagClass = 'tag-scam';
-            clickText = `選擇 (強制損失 $${card.scamCost})`;
+            clickText = `選擇 (高風險，一旦選擇強制執行)`;
             // 詐騙卡允許選擇，不檢查資產
         } else {
             if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
@@ -1150,6 +1157,28 @@ function renderCards(isSpecialEvent) {
         `;
         div.onclick = () => {
             if (!isDisabled) {
+                // 詐騙卡片的 effect 函數需要傳入 card 本身才能讀取 scamCost
+                if (isScam) {
+                    // 對於非彈性存款，單獨處理詐騙卡的執行邏輯
+                    if (gameState.selectionCount + gameState.selectedIndices.length < gameState.maxSelections) {
+                        card.effect(player, card); // 立即執行詐騙卡的 effect
+                        gameState.selectionCount++;
+
+                        let currentSelected = gameState.selectionCount + gameState.selectedIndices.length;
+                        if (currentSelected < gameState.maxSelections) {
+                            log(`✅ ${player.name} 執行詐騙行動，還可再選 ${gameState.maxSelections - currentSelected} 張卡片。`);
+                            document.getElementById('confirm-btn').disabled = false;
+                            document.getElementById('confirm-btn').innerText = `確認行動 (已選 ${currentSelected} / ${gameState.maxSelections})`;
+                        } else {
+                            confirmAction(true); 
+                        }
+                    } else {
+                         log(`⚠️ 最多只能選擇 ${gameState.maxSelections - gameState.selectionCount} 張卡片！`, 'bad');
+                    }
+                    return;
+                }
+                
+                // 正常卡片點擊邏輯
                 handleCardClick(idx);
             }
         };
