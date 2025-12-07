@@ -942,32 +942,39 @@ const generators = {
     },
     
     // --- 特殊事件卡牌產生器 ---
+    // --- 特殊事件卡牌產生器 ---
     specialEventCard: (type) => {
+        const applyLoss = (p, loss) => {
+            let actualLoss = loss;
+            
+            // 優先扣除現金
+            if (p.cash >= actualLoss) {
+                p.cash -= actualLoss;
+            } else {
+                let shortage = actualLoss - p.cash;
+                p.cash = 0;
+                // 不檢查存款是否足夠，允許存款為負 (即產生債務)
+                p.bank -= shortage;
+            }
+            return actualLoss;
+        };
+
         switch(type) {
             case 5:
                 return [
                     {
-                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', cost: 1000,
-                        desc: '「有一個人透過FB私訊你說有高薪國外機會，有沒有興趣?」',
+                        title: '✅ 接受國外高薪機會', tag: '詐騙陷阱', loss: 1000,
+                        desc: '「有一個人透過FB私訊你說有高薪國外機會，你有沒有興趣?」',
                         effect: (p) => {
                             const loss = 1000;
-                            const actualLoss = Math.min(loss, p.cash + p.bank);
-                            
-                            // 優先扣現金，不足扣存款
-                            if (p.cash >= actualLoss) {
-                                p.cash -= actualLoss;
-                            } else {
-                                p.bank -= (actualLoss - p.cash);
-                                p.cash = 0;
-                            }
-                            
+                            const actualLoss = applyLoss(p, loss);
                             p.hp = Math.max(0, p.hp - 10);
                             
                             return `💥 被詐騙！損失 $${actualLoss}，健康 -10 (出國差點被關在詐騙園區，家裡花錢撈人。)`;
                         }
                     },
                     {
-                        title: '❌ 婉拒並封鎖訊息', tag: '明智抉擇', cost: 0,
+                        title: '❌ 婉拒並封鎖訊息', tag: '明智抉擇', loss: 0,
                         desc: '「恭喜你在電視上看到有人被騙，慶幸自己逃過一劫。」',
                         effect: (p) => {
                             return `👍 逃過一劫！資產無影響。`;
@@ -977,24 +984,17 @@ const generators = {
             case 12:
                 return [
                     {
-                        title: '✅ 加入飆股群組', tag: '假投資陷阱', cost: 2000,
-                        desc: '「有人在LINE發訊息說張忠謀開課教你如何投資股票，有沒有興趣加入群組?」',
+                        title: '✅ 加入飆股群組', tag: '假投資陷阱', loss: 2000,
+                        desc: '「有人在LINE發訊息說張忠謀開課教你如何投資股票，帶你飆股，有沒有興趣加入群組?」',
                         effect: (p) => {
                             const loss = 2000;
-                            const actualLoss = Math.min(loss, p.cash + p.bank);
-
-                            if (p.cash >= actualLoss) {
-                                p.cash -= actualLoss;
-                            } else {
-                                p.bank -= (actualLoss - p.cash);
-                                p.cash = 0;
-                            }
+                            const actualLoss = applyLoss(p, loss);
 
                             return `💣 假投資平台！儲進去的 $${actualLoss} 直接歸零。`;
                         }
                     },
                     {
-                        title: '❌ 不理會，退出群組', tag: '明智抉擇', cost: 0,
+                        title: '❌ 不理會，退出群組', tag: '明智抉擇', loss: 0,
                         desc: '「還好沒被騙，嚇死寶寶了。」',
                         effect: (p) => {
                             return `👍 逃過一劫！資產無影響。`;
@@ -1004,25 +1004,18 @@ const generators = {
             case 18:
                 return [
                     {
-                        title: '✅ 選擇強硬拒絕', tag: '明智抉擇', cost: 0,
+                        title: '✅ 選擇強硬拒絕', tag: '明智抉擇', loss: 0,
                         desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (強硬拒絕)',
                         effect: (p) => {
                             return `👍 成功逃離！資產無影響。`;
                         }
                     },
                      {
-                        title: '❌ 被迫購買全套產品', tag: '強迫推銷', cost: 5000,
+                        title: '❌ 被迫購買全套產品', tag: '強迫推銷', loss: 5000,
                         desc: '「有人在路上拉著你說要去試用化妝品，試用不用錢...」 (花錢了事)',
                         effect: (p) => {
                             const loss = 5000;
-                            const actualLoss = Math.min(loss, p.cash + p.bank);
-
-                            if (p.cash >= actualLoss) {
-                                p.cash -= actualLoss;
-                            } else {
-                                p.bank -= (actualLoss - p.cash);
-                                p.cash = 0;
-                            }
+                            const actualLoss = applyLoss(p, loss);
                             
                             return `💸 逃不出推銷！花 $${actualLoss} 買了一整套沒用化妝品。`;
                         }
@@ -1148,12 +1141,6 @@ function renderCards(isSpecialEvent) {
         if (isSpecialEvent) {
             tagClass = card.tag.includes('明智') ? 'tag-risk-low' : 'tag-special-danger';
             clickText = `選擇 (${card.cost > 0 ? ' -$'+card.cost : '不花錢'})`;
-            
-            // 檢查資產是否足夠支付特殊事件的成本
-            if (cost > totalLiquidAssets && cost > 0) {
-                 isDisabled = true;
-                 disableReason = `🚨 資產($${totalLiquidAssets})不足$${cost}，無法選擇此項。`;
-            }
         } else {
             // 正常回合的標籤和禁用邏輯 (略)
             if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
