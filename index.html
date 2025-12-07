@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v2.5 (最終優化版)</title>
+    <title>社畜生存戰：理財 Roguelike v2.6 (動態優化版)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -39,6 +39,12 @@
             padding: 15px 50px;
             font-size: 1.4em;
             /* 新增樣式，用於確認按鈕的禁用狀態 */
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #1e8449;
             transition: all 0.1s;
         }
         .confirm-btn:active { transform: translateY(4px); box-shadow: none; }
@@ -274,7 +280,8 @@ const CONFIG = {
     maxHp: 100,
     safeHours: 8, 
     overworkPenalty: 3, 
-    turnsPerMonth: 4 
+    turnsPerMonth: 4,
+    turnSalaryIncrease: 0.02 // 每輪薪水增加 2%
 };
 
 let gameState = {
@@ -282,8 +289,8 @@ let gameState = {
     phase: 'p1_choice', 
     players: [],
     currentCards: [],
-    selectedIndices: [], // 追蹤被選擇卡牌的索引
-    maxSelections: 1 // 該輪次允許的最大選擇數
+    selectedIndices: [], 
+    maxSelections: 1 
 };
 
 // --- 初始化 ---
@@ -293,7 +300,7 @@ function createPlayer(name) {
         cash: CONFIG.startCash,
         bank: 0,
         rate: CONFIG.baseRate,
-        tempRateBoost: 0,
+        tempRateBoost: { amount: 0, turnsLeft: 0 }, // 結構調整為物件
         hp: CONFIG.startHp,
         stableJob: null, 
         partTimeJobs: [], 
@@ -319,13 +326,13 @@ function startGame() {
 // --- 遊戲流程控制 ---
 function startPlayerTurn(playerIdx) {
     gameState.phase = playerIdx === 0 ? 'p1_choice' : 'p2_choice';
-    gameState.selectedIndices = []; // 重設選擇
+    gameState.selectedIndices = []; 
     
     // 決定本輪最大選擇數
     if (gameState.turn === 1) {
         gameState.maxSelections = 1; 
     } else {
-        gameState.maxSelections = 2; // T2+ 可選 1 或 2 張
+        gameState.maxSelections = 2; 
     }
 
     updateUI();
@@ -336,13 +343,54 @@ function startPlayerTurn(playerIdx) {
     btn.disabled = true;
     btn.innerText = `確認行動 (請選擇 1-${gameState.maxSelections} 張卡)`;
 
-    // 確保所有卡片都可點擊（移除 disabled 狀態）
+    // 確保所有卡片都可點擊
     document.querySelectorAll('.card').forEach(card => card.classList.remove('disabled', 'selected'));
 }
 
 function handleCardClick(index) {
     const btn = document.getElementById('confirm-btn');
     const cardElement = document.getElementById(`card-${index}`);
+    const card = gameState.currentCards[index];
+    const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
+    const player = gameState.players[playerIdx];
+
+    // 存款特殊處理：直接彈出 Prompt 進行選擇，不進入選中狀態
+    if (card.title === '💰 彈性存款') {
+        // 先將所有卡片設為 disabled，避免玩家在 prompt 彈窗時亂點
+        document.querySelectorAll('.card').forEach(c => c.classList.add('disabled'));
+
+        let input = prompt("請輸入存款比例：20 (20%) / 50 (50%) / ALL (全部)");
+        
+        // 重新啟用卡片，讓玩家可以重新選擇
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('disabled'));
+
+        if (input) {
+            input = input.toUpperCase().trim();
+            
+            let amtToDeposit = 0;
+            if (input === 'ALL') {
+                amtToDeposit = player.cash;
+            } else {
+                const percentage = parseInt(input);
+                if (percentage === 20 || percentage === 50) {
+                    amtToDeposit = Math.floor(player.cash * (percentage / 100));
+                }
+            }
+
+            if (amtToDeposit > 0) {
+                // 自動將存款卡選中並確認
+                gameState.selectedIndices = [index];
+                card.effect(player, amtToDeposit); // 執行帶參數的效果
+                confirmAction(true); // 強制觸發確認
+                return;
+            }
+        }
+        log(`⚠️ ${player.name} 取消或無效的存款選擇。`, 'bad');
+        return;
+    }
+
+
+    // 正常選擇邏輯
     const idx = gameState.selectedIndices.indexOf(index);
 
     if (idx > -1) {
@@ -370,11 +418,11 @@ function handleCardClick(index) {
     }
 }
 
-function confirmAction() {
+function confirmAction(isQuickAction = false) {
     const playerIdx = gameState.phase === 'p1_choice' ? 0 : 1;
     const player = gameState.players[playerIdx];
 
-    if (gameState.selectedIndices.length < 1 || gameState.selectedIndices.length > gameState.maxSelections) {
+    if (!isQuickAction && (gameState.selectedIndices.length < 1 || gameState.selectedIndices.length > gameState.maxSelections)) {
          log(`⚠️ ${player.name} 必須選擇 1 到 ${gameState.maxSelections} 張卡片！`, 'bad');
          return;
     }
@@ -390,8 +438,15 @@ function confirmAction() {
     // 執行選中的卡牌效果
     gameState.selectedIndices.forEach(index => {
         const card = gameState.currentCards[index];
-        const result = card.effect(player);
-        results.push(`[${card.title}] - ${result}`);
+        
+        // 針對非存款卡，效果執行不需要額外參數
+        if (card.title !== '💰 彈性存款') {
+            const result = card.effect(player);
+            results.push(`[${card.title}] - ${result}`);
+        } else {
+             // 存款卡的效果已經在 handleCardClick 中執行並日誌記錄，這裡只記錄 title
+             results.push(`[${card.title}] - 已執行`);
+        }
     });
 
     log(executionLog + results.join(' | '));
@@ -413,106 +468,96 @@ function confirmAction() {
 }
 
 
-// --- 卡牌生成器 (略) ---
+// --- 卡牌生成器 ---
+
+// 計算動態薪水
+function getDynamicPay(basePay) {
+    if (gameState.turn === 1) return basePay;
+    
+    const increaseFactor = 1 + (gameState.turn - 1) * CONFIG.turnSalaryIncrease;
+    return Math.floor(basePay * increaseFactor / 10) * 10; // 取整十
+}
 
 // 計算預估月收入 (假設 1 輪 = 1 週, 1 月 = 4 輪)
 function getEstimatedMonthlyIncome(pay) {
-    // pay 是每輪收入
     return pay * CONFIG.turnsPerMonth;
 }
 
 const generators = {
     // 穩定工作類 (替換制)
-    jobStableStandard: () => ({
-        type: 'JOB_STABLE',
-        title: '💼 一般職員',
-        tag: '穩定工作',
-        desc: `標準工時 **8 小時**。預估月收入 $${getEstimatedMonthlyIncome(200)}。`,
-        val: { pay: 200, hours: 8 }, 
-        effect: (p) => {
-            p.stableJob = { name: '一般職員', pay: 200, hours: 8, desc: '8hr/日' };
-            return '獲得穩定工作 (8hr/日)';
-        }
-    }),
-    jobStableShift: () => ({
-        type: 'JOB_STABLE',
-        title: '🏭 產線作業員',
-        tag: '做二休二',
-        desc: `每日 **10 小時**。高薪但有過勞風險。預估月收入 $${getEstimatedMonthlyIncome(300)}。`,
-        val: { pay: 300, hours: 10 }, 
-        effect: (p) => {
-            p.stableJob = { name: '作業員(做二休二)', pay: 300, hours: 10, desc: '10hr/日(均)' };
-            return '獲得高工時工作 (10hr/日)';
-        }
-    }),
-    jobStableOvertime: () => ({
-        type: 'JOB_STABLE',
-        title: '💻 責任制工程師',
-        tag: '爆肝',
-        desc: `每日 **12 小時**。極高收入但健康扣損嚴重。預估月收入 $${getEstimatedMonthlyIncome(450)}。`,
-        val: { pay: 450, hours: 12 },
-        effect: (p) => {
-            p.stableJob = { name: '責任制工程師', pay: 450, hours: 12, desc: '12hr/日' };
-            return '獲得爆肝工作 (12hr/日)';
-        }
-    }),
-    jobStableLow: () => ({
-        type: 'JOB_STABLE',
-        title: '🛒 便利商店店員',
-        tag: '低薪',
-        desc: `標準工時 **8 小時**。收入較低，適合保守玩家。預估月收入 $${getEstimatedMonthlyIncome(150)}。`,
-        val: { pay: 150, hours: 8 }, 
-        effect: (p) => {
-            p.stableJob = { name: '便利商店店員', pay: 150, hours: 8, desc: '8hr/日' };
-            return '獲得穩定低薪工作 (8hr/日)';
-        }
-    }),
-    jobStableMed: () => ({
-        type: 'JOB_STABLE',
-        title: '👨‍🏫 補習班老師',
-        tag: '中薪',
-        desc: `每日 **9 小時**。略微超時，中等收入。預估月收入 $${getEstimatedMonthlyIncome(250)}。`,
-        val: { pay: 250, hours: 9 },
-        effect: (p) => {
-            p.stableJob = { name: '補習班老師', pay: 250, hours: 9, desc: '9hr/日' };
-            return '獲得中等工作 (9hr/日)';
-        }
-    }),
-
+    jobStableStandard: () => {
+        const basePay = 200;
+        const pay = getDynamicPay(basePay);
+        return {
+            title: '💼 一般職員',
+            tag: '穩定工作',
+            desc: `標準工時 **8 小時**。每輪收入 $${pay}。`,
+            effect: (p) => {
+                p.stableJob = { name: '一般職員', pay: pay, hours: 8, desc: '8hr/日' };
+                return '獲得穩定工作 (8hr/日)';
+            }
+        };
+    },
+    jobStableShift: () => {
+        const basePay = 300;
+        const pay = getDynamicPay(basePay);
+        return {
+            title: '🏭 產線作業員',
+            tag: '做二休二',
+            desc: `每日 **10 小時**。高薪但有過勞風險。每輪收入 $${pay}。`,
+            effect: (p) => {
+                p.stableJob = { name: '作業員(做二休二)', pay: pay, hours: 10, desc: '10hr/日(均)' };
+                return '獲得高工時工作 (10hr/日)';
+            }
+        };
+    },
+    jobStableOvertime: () => {
+        const basePay = 450;
+        const pay = getDynamicPay(basePay);
+        return {
+            title: '💻 責任制工程師',
+            tag: '爆肝',
+            desc: `每日 **12 小時**。極高收入但健康扣損嚴重。每輪收入 $${pay}。`,
+            effect: (p) => {
+                p.stableJob = { name: '責任制工程師', pay: pay, hours: 12, desc: '12hr/日' };
+                return '獲得爆肝工作 (12hr/日)';
+            }
+        };
+    },
 
     // 兼職類 (疊加，有輪數)
     jobPartTime: () => {
         const hours = randInt(2, 4);
-        const pay = hours * randInt(20, 30); // 時薪約 20-30
+        const basePay = hours * randInt(20, 30); 
+        const pay = getDynamicPay(basePay);
         const turns = randInt(3, 5);
         return {
-            type: 'JOB_PART',
             title: '🛵 外送兼職',
             tag: '兼職',
             desc: `每日額外工作 ${hours} 小時，每輪 +$${pay}，持續 ${turns} 輪。`,
             effect: (p) => {
                 p.partTimeJobs.push({ name: '外送', pay: pay, hours: hours, turnsLeft: turns });
-                return `開始兼職 (每日+${hours}hr)`;
+                return `開始兼職 (每日+${hours}hr, 持續${turns}輪)`;
             }
         };
     },
 
-    // 銀行類
-    deposit: () => {
-        const v = randInt(50, 150); 
-        return {
-            title: '💰 存入資金',
-            tag: '理財',
-            desc: `存入 $${v} (現金不足則全存)。`,
-            effect: (p) => {
-                let amt = Math.min(p.cash, v);
-                if (amt <= 0) return '沒現金可存';
-                p.cash -= amt;
-                p.bank += amt;
-                return `存入 $${amt}`;
-            }
-        };
-    },
+    // 銀行類：彈性存款 (需額外處理)
+    depositFlexible: () => ({
+        title: '💰 彈性存款',
+        tag: '理財 (Prompt)',
+        desc: `選擇存入現金的 **20%, 50% 或 ALL**。 (點擊後輸入)`,
+        effect: (p, amt) => {
+            let amtToDeposit = Math.min(p.cash, amt);
+            if (amtToDeposit <= 0) return '沒現金可存';
+            p.cash -= amtToDeposit;
+            p.bank += amtToDeposit;
+            log(`${p.name} 選擇存入 $${amtToDeposit} (佔比 ${(amtToDeposit / p.cash * 100).toFixed(0)}%)`);
+            return `存入 $${amtToDeposit}`;
+        }
+    }),
+    
+    // 銀行類：提取資金
     withdraw: () => {
         const v = randInt(50, 100);
         return {
@@ -528,18 +573,23 @@ const generators = {
             }
         };
     },
-    rateBoost: () => {
-        const v = randInt(15, 40) / 10; // 1.5% - 4.0%
+    
+    // 銀行類：利率臨時提高
+    rateBoostLong: () => {
+        const v = randInt(15, 40) / 1000; // 0.015 - 0.040 (1.5% - 4.0%)
+        const turns = 3;
         return {
-            title: '📈 利率加碼',
-            tag: '銀行活動',
-            desc: `本輪存款利率臨時 +${v}%。`,
+            title: '🏦 銀行加息活動',
+            tag: '特殊',
+            desc: `存款利率在接下來 ${turns} 輪臨時 +${(v * 100).toFixed(1)}%。`,
             effect: (p) => {
-                p.tempRateBoost += (v / 100);
-                return `利率臨時 +${v}%`;
+                p.tempRateBoost.amount = v;
+                p.tempRateBoost.turnsLeft = turns;
+                return `利率臨時 +${(v * 100).toFixed(1)}% (${turns} 輪)`;
             }
         };
     },
+
 
     // 投資類 (風險制)
     invest: () => {
@@ -557,7 +607,7 @@ const generators = {
             title: '🚀 投資機會',
             tag: riskText,
             riskLevel: riskTag, 
-            desc: `投入 $${cost}，${wait} 輪後結算。風險值: ${risk} (可能導致虧損或負債)。`,
+            desc: `投入 $${cost}，${wait} 輪後結算。風險值: ${risk}。`,
             effect: (p) => {
                 if (p.cash < cost) return '現金不足無法投資';
                 p.cash -= cost;
@@ -595,40 +645,68 @@ function generateCards(playerIdx) {
         pool = [
             generators.jobStableStandard,
             generators.jobStableShift,
+            generators.jobStableOvertime
+        ];
+        // T1 確保五張卡，補齊低薪和中薪
+        let t1Jobs = [
+            generators.jobStableStandard,
+            generators.jobStableShift,
             generators.jobStableOvertime,
             generators.jobStableLow,
             generators.jobStableMed
         ];
+        
+        // 確保 T1 抽滿 5 張不重複
+        let uniqueT1Deck = [];
+        let t1Titles = new Set();
+        
+        while(uniqueT1Deck.length < 5) {
+            let genFunc = t1Jobs[Math.floor(Math.random() * t1Jobs.length)];
+            let card = genFunc();
+            if (!t1Titles.has(card.title)) {
+                t1Titles.add(card.title);
+                uniqueT1Deck.push(card);
+            }
+        }
+        gameState.currentCards = uniqueT1Deck;
+        
     } else {
-        // T2 之後：正常混合牌庫
+        // T2 之後：調整機率的混合牌庫
         pool = [
+            // 工作機會降低 (3 份)
             generators.jobStableStandard, generators.jobStableShift, generators.jobStableOvertime,
+            
+            // 兼職 (2 份)
             generators.jobPartTime, generators.jobPartTime,
-            generators.deposit, generators.deposit, generators.deposit,
-            generators.withdraw, generators.rateBoost,
-            generators.invest, generators.invest, generators.invest,
+            
+            // 銀行理財 (3 份 - 包含新的彈性存款和長效加息)
+            generators.depositFlexible, generators.withdraw, generators.rateBoostLong,
+            
+            // 投資 (5 份)
+            generators.invest, generators.invest, generators.invest, generators.invest, generators.invest,
+            
+            // 健康休息 (2 份)
             generators.rest, generators.rest
         ];
+
+        // T2+ 確保抽 5 張不重複
+        let uniqueDeck = [];
+        let cardTitles = new Set();
+        const maxAttempts = pool.length * 2; // 防止無限循環
+        let attempts = 0;
+
+        while(uniqueDeck.length < 5 && attempts < maxAttempts) {
+            let genFunc = pool[Math.floor(Math.random() * pool.length)];
+            let card = genFunc();
+            if (!cardTitles.has(card.title)) {
+                cardTitles.add(card.title);
+                uniqueDeck.push(card);
+            }
+            attempts++;
+        }
+        gameState.currentCards = uniqueDeck;
     }
     
-    // 洗牌抽 5 張
-    let deck = [];
-    // T1 固定從 5 種工作 generator 中抽
-    if (gameState.turn === 1) {
-        for (let i = pool.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
-        deck = pool.slice(0, 5).map(genFunc => genFunc());
-    } else {
-         // T2+，從大池中隨機抽 5 個 generator 實例化
-        for(let i=0; i<5; i++) {
-            let gen = pool[Math.floor(Math.random() * pool.length)];
-            deck.push(gen());
-        }
-    }
-    
-    gameState.currentCards = deck;
     renderCards();
 }
 
@@ -639,12 +717,15 @@ function renderCards() {
     gameState.currentCards.forEach((card, idx) => {
         let div = document.createElement('div');
         div.className = `card`; 
-        div.id = `card-${idx}`; // 賦予 ID 供點擊時選中
+        div.id = `card-${idx}`; 
         
         let tagClass = 'tag-none';
         if (card.tag.includes('風險')) tagClass = `tag-${card.riskLevel}`;
         else if (card.tag.includes('工作') || card.tag.includes('兼職')) tagClass = 'tag-job';
-        else if (card.tag.includes('健康')) tagClass = 'tag-special';
+        else if (card.tag.includes('健康') || card.tag.includes('特殊')) tagClass = 'tag-special';
+
+        // 存款卡片特殊標註
+        let clickText = (card.title === '💰 彈性存款') ? '點擊輸入比例 (立即執行)' : '點擊選擇';
 
         div.innerHTML = `
             <div>
@@ -654,7 +735,7 @@ function renderCards() {
                 </div>
                 <div class="card-desc">${card.desc}</div>
             </div>
-            <small style="color:#7f8c8d; font-size:0.9em;">點擊選擇</small>
+            <small style="color:#7f8c8d; font-size:0.9em;">${clickText}</small>
         `;
         div.onclick = () => handleCardClick(idx);
         container.appendChild(div);
@@ -685,6 +766,7 @@ function processTurn() {
         }
 
         // 2. 生病判定
+        // 健康值越低，生病機率越高，邏輯符合要求
         let sickChance = (100 - p.hp) * 0.5 / 100;
         if (Math.random() < sickChance) {
             let cost = 100;
@@ -755,14 +837,19 @@ function processTurn() {
         }
 
         // 6. 利息
-        let currentRate = p.rate + p.tempRateBoost;
+        let currentRate = p.rate; 
+        
+        if (p.tempRateBoost.turnsLeft > 0) {
+            currentRate += p.tempRateBoost.amount;
+            p.tempRateBoost.turnsLeft--; 
+        }
+
         let interest = Math.floor(p.bank * currentRate);
         if (interest > 0) {
             p.bank += interest;
             logs.push(`利息(${(currentRate*100).toFixed(1)}%) <span class="log-good">+$${interest}</span>`);
         }
-        p.tempRateBoost = 0;
-
+        
         // 7. 破產處理
         if (p.cash < 0) {
             if (p.bank >= -p.cash) {
@@ -840,8 +927,12 @@ function updatePlayerUI(idx, prefix) {
     else hpBar.style.background = '#27ae60';
 
     // 利率
-    let finalRate = (p.rate + p.tempRateBoost) * 100;
-    document.getElementById(`${prefix}-rate`).innerText = `${finalRate.toFixed(1)}%`;
+    let finalRate = (p.rate + p.tempRateBoost.amount) * 100;
+    let rateText = `${finalRate.toFixed(1)}%`;
+    if (p.tempRateBoost.turnsLeft > 0) {
+        rateText += ` (+${p.tempRateBoost.turnsLeft} 輪)`;
+    }
+    document.getElementById(`${prefix}-rate`).innerText = rateText;
 
     // 狀態描述
     let statusParts = [];
