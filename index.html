@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>財富對決：理財 Roguelike</title>
+    <title>財富對決：理財 Roguelike (隨機強化版)</title>
     <style>
         :root {
             --primary: #2c3e50;
@@ -42,10 +42,12 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             flex: 1;
             border-top: 5px solid var(--accent);
+            transition: transform 0.3s, border 0.3s;
         }
         .player-stats.active {
-            transform: scale(1.02);
+            transform: scale(1.05);
             border: 2px solid #3498db;
+            box-shadow: 0 0 15px rgba(52, 152, 219, 0.4);
         }
         .stat-row {
             display: flex;
@@ -84,22 +86,26 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-height: 150px;
+            min-height: 160px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            position: relative;
+            overflow: hidden;
         }
         .card:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 15px rgba(0,0,0,0.1);
             border-color: var(--accent);
         }
-        .card-title { font-weight: bold; margin-bottom: 10px; color: #2980b9; }
-        .card-desc { font-size: 0.9em; color: #555; }
+        .card-title { font-weight: bold; margin-bottom: 10px; color: #2980b9; font-size: 1.1em; }
+        .card-desc { font-size: 0.9em; color: #555; line-height: 1.4; }
         .card-type { 
-            font-size: 0.8em; 
+            font-size: 0.75em; 
             text-transform: uppercase; 
-            color: #999; 
+            color: #aaa; 
             margin-top: 10px; 
             text-align: right;
+            border-top: 1px solid #eee;
+            padding-top: 5px;
         }
 
         /* 事件與日誌 */
@@ -113,7 +119,7 @@
             font-family: monospace;
         }
         .log-entry { margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 2px; }
-        .log-turn { color: #e67e22; font-weight: bold; }
+        .log-turn { color: #e67e22; font-weight: bold; background: #fff3e0; padding: 2px 5px; }
         .log-event { color: #e74c3c; font-weight: bold; }
         .log-gain { color: var(--accent); }
 
@@ -135,10 +141,7 @@
             font-weight: bold;
             color: #d35400;
             margin: 10px 0;
-            animation: fadeIn 0.5s;
         }
-
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -210,18 +213,17 @@ let gameState = {
     logs: []
 };
 
-// 初始化玩家物件結構
 function createPlayer(name) {
     return {
         name: name,
         cash: CONFIG.startCash,
         bank: 0,
         rate: CONFIG.baseRate,
-        tempRateBoost: 0, // 臨時利率加成
-        activeJobs: [], // { income, turnsLeft }
-        investments: [], // { returnAmount, turnsLeft, bonusChance, bonusAmount }
-        lockedSavings: [], // { amount, rate, turnsLeft }
-        roundIncome: 0 // 當前輪次收入（用於計算十一）
+        tempRateBoost: 0, 
+        activeJobs: [], 
+        investments: [],
+        lockedSavings: [],
+        roundIncome: 0
     };
 }
 
@@ -233,190 +235,225 @@ function startGame() {
     gameState.players = [createPlayer('A 組'), createPlayer('B 組')];
     gameState.phase = 'p1_choice';
     
-    log("遊戲開始！目標是20輪後資產最高。");
+    log("遊戲開始！目標是20輪後資產最高。", 'turn');
     updateUI();
-    generateCards(0); // 為玩家 0 生成卡牌
+    generateCards(0); 
 }
 
-// 產生隨機選項
+// ---------------------------------------------------------
+// 卡牌生成系統 (核心修改處)
+// ---------------------------------------------------------
+
+// 定義各種類型的卡牌生成器函數 (每次呼叫都會返回新的數值)
+const generators = {
+    // 1. 工作類
+    jobLow: () => createJobCard("臨時打工", 20, 25, 2, 3), // 短期低薪
+    jobMid: () => createJobCard("穩定兼職", 15, 20, 4, 6), // 長期穩定
+    jobHigh: () => createJobCard("高薪合約", 35, 55, 2, 3), // 高薪短期
+
+    // 2. 銀行操作類
+    deposit: () => {
+        let v = randInt(20, 100);
+        return {
+            type: 'DEPOSIT',
+            title: '💰 存入銀行',
+            val: v,
+            desc: `存入 ${v} 元 (若現金不足則存入全部)。`,
+            effect: (p) => {
+                let amount = Math.min(p.cash, v);
+                if (amount <= 0) return `現金不足，無法存錢`;
+                p.cash -= amount;
+                p.bank += amount;
+                return `存入了 ${amount} 元`;
+            }
+        };
+    },
+    withdraw: () => {
+        let v = randInt(20, 80);
+        return {
+            type: 'WITHDRAW',
+            title: '🏧 從銀行領錢',
+            val: v,
+            desc: `領出 ${v} 元 (若存款不足則領出全部)。`,
+            effect: (p) => {
+                let amount = Math.min(p.bank, v);
+                if (amount <= 0) return `存款不足，無法領錢`;
+                p.bank -= amount;
+                p.cash += amount;
+                return `領出了 ${amount} 元`;
+            }
+        };
+    },
+    rateBoost: () => {
+        let v = randInt(10, 25) / 10; // 1.0% - 2.5%
+        return {
+            type: 'RATE',
+            title: '📈 爭取利率優惠',
+            val: v,
+            desc: `本輪銀行利率臨時增加 ${v}% (僅限下一輪結算)。`,
+            effect: (p) => {
+                p.tempRateBoost += (v / 100);
+                return `獲得臨時利率加成 +${v}%`;
+            }
+        };
+    },
+    lockSavings: () => {
+        let amt = randInt(50, 100);
+        let r = randInt(30, 50) / 10; // 3.0% - 5.0%
+        let t = randInt(3, 5);
+        return {
+            type: 'LOCK',
+            title: '🔒 定期存單',
+            val: { amt, r, t },
+            desc: `鎖定存款 ${amt} 元，享 ${r}% 利率，持續 ${t} 輪。`,
+            effect: (p) => {
+                if (p.bank < amt) return `銀行存款不足 ${amt}，交易失敗`;
+                p.bank -= amt;
+                p.lockedSavings.push({ amount: amt, rate: r / 100, turnsLeft: t });
+                return `鎖定 ${amt} 元進行定存`;
+            }
+        };
+    },
+    
+    // 3. 投資類
+    invest: () => {
+        let cost = randInt(40, 70);
+        let roi = randInt(125, 160); // 125% - 160% 回報
+        let wait = randInt(2, 4);
+        return {
+            type: 'INVEST',
+            title: '🚀 風險投資',
+            val: { cost, roi, wait },
+            desc: `花費 ${cost} 元，${wait} 輪後回收 ${Math.floor(cost * roi/100)} 元。有機率獲額外獎勵。`,
+            effect: (p) => {
+                if (p.cash < cost) return `現金不足 ${cost}，投資失敗`;
+                p.cash -= cost;
+                let returnAmt = Math.floor(cost * (roi / 100));
+                let bonus = Math.floor(cost * 0.5);
+                p.investments.push({
+                    returnAmount: returnAmt,
+                    turnsLeft: wait,
+                    bonusChance: 0.3,
+                    bonusAmount: bonus
+                });
+                return `投資 ${cost} 元，預期回收 ${returnAmt}`;
+            }
+        };
+    }
+};
+
 function generateCards(playerIndex) {
     const container = document.getElementById('cards-container');
     container.innerHTML = '';
     
-    // 定義卡牌池與權重
-    // 類型: JOB, DEPOSIT, RATE, WITHDRAW, LOCK, INVEST
-    const options = [];
-    
-    // 1. 工作 (初期權重高)
+    // 建立卡池 (Deck Building Strategy)
+    // 我們將「生成器函數」放入陣列，而不是卡牌物件本身
+    let deck = [];
+
+    // 1. 保底工作卡 (確保前期有錢賺)
+    // 前 5 輪放入較多容易上手的工作
     if (gameState.turn <= 5) {
-        options.push(createJobCard(20, 30, 3, 5)); // 低薪長工
-        options.push(createJobCard(30, 50, 2, 3)); // 高薪短工
-        options.push(createJobCard(15, 20, 5, 8)); // 穩定工作
+        deck.push(generators.jobLow);
+        deck.push(generators.jobLow);
+        deck.push(generators.jobMid);
+        deck.push(generators.jobHigh);
+        deck.push(generators.deposit); 
     } else {
-        options.push(createJobCard(30, 60, 2, 4));
+        deck.push(generators.jobMid);
+        deck.push(generators.jobHigh);
     }
 
-    // 2. 存款/提款/利率
-    options.push({
-        type: 'DEPOSIT',
-        title: '💰 存入銀行',
-        val: randInt(20, 100),
-        desc: (v) => `存入 ${v} 元 (若現金不足存入全部)。`,
-        effect: (p, v) => {
-            let amount = Math.min(p.cash, v);
-            if (amount <= 0) return `現金不足，無法存錢`;
-            p.cash -= amount;
-            p.bank += amount;
-            return `存入了 ${amount} 元`;
-        }
-    });
+    // 2. 隨機填充剩餘卡池
+    // 這裡我們定義權重，重複 push 生成器進去，增加抽中機率
+    const pool = [
+        generators.jobLow, generators.jobMid, generators.jobHigh, // 工作
+        generators.deposit, generators.deposit, // 存款 (多放一點)
+        generators.withdraw, generators.withdraw, // 提款
+        generators.rateBoost, 
+        generators.lockSavings, 
+        generators.invest
+    ];
 
-    options.push({
-        type: 'WITHDRAW',
-        title: '🏧 從銀行領錢',
-        val: randInt(20, 100),
-        desc: (v) => `領出 ${v} 元 (若存款不足領出全部)。`,
-        effect: (p, v) => {
-            let amount = Math.min(p.bank, v);
-            if (amount <= 0) return `存款不足，無法領錢`;
-            p.bank -= amount;
-            p.cash += amount;
-            return `領出了 ${amount} 元`;
-        }
-    });
-
-    options.push({
-        type: 'RATE',
-        title: '📈 爭取利率優惠',
-        val: randInt(10, 30) / 10, // 1.0% - 3.0%
-        desc: (v) => `本輪銀行利率臨時增加 ${v}% (僅限下一輪結算)。`,
-        effect: (p, v) => {
-            p.tempRateBoost += (v / 100);
-            return `獲得臨時利率加成 +${v}%`;
-        }
-    });
-
-    // 3. 鎖定儲蓄
-    options.push({
-        type: 'LOCK',
-        title: '🔒 定期存單',
-        val: { amt: randInt(50, 100), rate: randInt(3, 6), turn: randInt(3, 5) },
-        desc: (v) => `鎖定存款 ${v.amt} 元，享 ${v.rate}% 利率，持續 ${v.turn} 輪。`,
-        effect: (p, v) => {
-            if (p.bank < v.amt) return `銀行存款不足 ${v.amt}，交易失敗`;
-            p.bank -= v.amt;
-            p.lockedSavings.push({
-                amount: v.amt,
-                rate: v.rate / 100,
-                turnsLeft: v.turn
-            });
-            return `鎖定 ${v.amt} 元進行定存`;
-        }
-    });
-
-    // 4. 投資
-    options.push({
-        type: 'INVEST',
-        title: '🚀 風險投資',
-        val: { cost: randInt(30, 60), roi: randInt(120, 150), wait: randInt(2, 4) },
-        desc: (v) => `花費 ${v.cost} 元，${v.wait} 輪後回收 ${Math.floor(v.cost * v.roi/100)} 元。有機率獲額外獎勵。`,
-        effect: (p, v) => {
-            if (p.cash < v.cost) return `現金不足 ${v.cost}，投資失敗`;
-            p.cash -= v.cost;
-            let returnAmt = Math.floor(v.cost * (v.roi / 100));
-            let bonus = Math.floor(v.cost * 0.5); // 50% 額外獎勵
-            p.investments.push({
-                returnAmount: returnAmt,
-                turnsLeft: v.wait,
-                bonusChance: 0.3, // 30% 機率
-                bonusAmount: bonus
-            });
-            return `投資了 ${v.cost} 元，等待回收`;
-        }
-    });
-
-    // 隨機選 5 個顯示
-    // 為了平衡，先確保有至少一個"工作"選項，如果是前幾輪
-    let choices = [];
-    if (gameState.turn <= 5) {
-        choices.push(options[0]); // 強制加入第一個工作選項
+    // 從 pool 隨機抓 10 個放進 deck 混洗
+    for(let i=0; i<10; i++) {
+        deck.push(pool[Math.floor(Math.random() * pool.length)]);
     }
-    
-    // 填充剩餘
-    while (choices.length < 5) {
-        let r = options[Math.floor(Math.random() * options.length)];
-        // 簡單去重：不完全精確但夠用
-        choices.push(r);
+
+    // 洗牌 (Fisher-Yates Shuffle)
+    for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
     }
-    // 隨機打亂
-    choices.sort(() => Math.random() - 0.5);
+
+    // 取前 5 張並「實例化」(執行生成器函數)
+    // 這一步至關重要：即使 deck[0] 和 deck[1] 都是 generators.jobLow，
+    // 執行兩次會得到兩個數值不同的卡牌物件。
+    let finalCards = deck.slice(0, 5).map(genFunc => genFunc());
 
     // 渲染卡牌
-    choices.forEach((opt, idx) => {
+    finalCards.forEach((card) => {
         let div = document.createElement('div');
         div.className = 'card';
-        // 解析描述
-        let descText = typeof opt.desc === 'function' ? opt.desc(opt.val) : opt.desc;
-        
         div.innerHTML = `
             <div>
-                <div class="card-title">${opt.title}</div>
-                <div class="card-desc">${descText}</div>
+                <div class="card-title">${card.title}</div>
+                <div class="card-desc">${card.desc}</div>
             </div>
-            <div class="card-type">${opt.type}</div>
+            <div class="card-type">${card.type}</div>
         `;
-        div.onclick = () => makeChoice(playerIndex, opt);
+        div.onclick = () => makeChoice(playerIndex, card);
         container.appendChild(div);
     });
 }
 
-function createJobCard(minPay, maxPay, minTurn, maxTurn) {
+function createJobCard(title, minPay, maxPay, minTurn, maxTurn) {
     let pay = randInt(minPay, maxPay);
     let turns = randInt(minTurn, maxTurn);
     return {
         type: 'JOB',
-        title: '💼 兼職工作',
-        val: { pay: pay, turns: turns },
-        desc: (v) => `獲得一份工作，每輪收入 ${v.pay} 元，持續 ${v.turns} 輪。`,
-        effect: (p, v) => {
-            p.activeJobs.push({ income: v.pay, turnsLeft: v.turns });
-            return `獲得工作：$${v.pay}/輪`;
+        title: `💼 ${title}`,
+        val: { pay, turns },
+        desc: `獲得工作，每輪收入 ${pay} 元，持續 ${turns} 輪。`,
+        effect: (p) => {
+            p.activeJobs.push({ income: pay, turnsLeft: turns });
+            return `獲得工作：$${pay}/輪`;
         }
     };
 }
 
+// ---------------------------------------------------------
+// 以下邏輯維持不變
+// ---------------------------------------------------------
+
 function makeChoice(playerIndex, option) {
     let player = gameState.players[playerIndex];
-    let result = typeof option.effect === 'function' ? option.effect(player, option.val) : "無效果";
+    // 執行效果時不需要傳 option.val，因為現在 effect 函數內部已經閉包綁定了當下的數值
+    // 但為了保持舊有結構相容，我們檢查參數
+    let result = option.effect(player); 
     
-    log(`${player.name} 選擇了 [${option.title}]：${result}`);
+    log(`${player.name} 選擇 [${option.title}]：${result}`);
     
     if (playerIndex === 0) {
-        // A 組選完換 B 組
         gameState.phase = 'p2_choice';
         updateUI();
         generateCards(1);
     } else {
-        // B 組選完，進入結算
         gameState.phase = 'processing';
         updateUI();
         document.getElementById('cards-container').innerHTML = '<h2 style="text-align:center; width:100%;">結算中...</h2>';
-        setTimeout(processTurn, 1000);
+        setTimeout(processTurn, 800);
     }
 }
 
-// 回合結算邏輯
 function processTurn() {
     log(`--- 第 ${gameState.turn} 輪結算 ---`, 'turn');
-    
-    // 1. 隨機事件 (共用)
     handleRandomEvents();
 
     gameState.players.forEach(p => {
-        p.roundIncome = 0; // 重置本輪收入
+        p.roundIncome = 0; 
         let logs = [];
 
-        // 2. 處理工作收入
+        // 工作收入
         if (p.activeJobs.length > 0) {
             let jobIncome = 0;
             p.activeJobs.forEach(j => {
@@ -429,14 +466,13 @@ function processTurn() {
             logs.push(`工作收入 +$${jobIncome}`);
         }
 
-        // 3. 處理投資回收
+        // 投資回收
         if (p.investments.length > 0) {
             let invIncome = 0;
             p.investments.forEach(inv => {
                 inv.turnsLeft--;
                 if (inv.turnsLeft === 0) {
                     invIncome += inv.returnAmount;
-                    // 暴擊檢定
                     if (Math.random() < inv.bonusChance) {
                         invIncome += inv.bonusAmount;
                         logs.push(`✨ 投資大賺！額外獲得 +$${inv.bonusAmount}`);
@@ -451,16 +487,13 @@ function processTurn() {
             }
         }
 
-        // 4. 定存利息 (鎖定資金)
+        // 定存利息
         if (p.lockedSavings.length > 0) {
             let lockIncome = 0;
             let releasedPrincipal = 0;
             p.lockedSavings.forEach(l => {
                 let interest = Math.floor(l.amount * l.rate);
-                // 這裡設計為：利息每輪發放到現金？還是滾入？
-                // 為了簡單，利息滾入本金，最後才拿回，或者每輪給現金。
-                // 根據題目 "每輪獲得m%利率"，假設利息是發出來的
-                p.roundIncome += interest; // 利息算收入
+                p.roundIncome += interest;
                 p.cash += interest;
                 lockIncome += interest;
                 
@@ -472,45 +505,40 @@ function processTurn() {
             p.lockedSavings = p.lockedSavings.filter(l => l.turnsLeft > 0);
             if (lockIncome > 0) logs.push(`定存利息 +$${lockIncome}`);
             if (releasedPrincipal > 0) {
-                p.bank += releasedPrincipal; // 本金回到活存
-                logs.push(`定存到期本金解鎖 +$${releasedPrincipal}`);
+                p.bank += releasedPrincipal;
+                logs.push(`定存本金解鎖 +$${releasedPrincipal}`);
             }
         }
 
-        // 5. 十一奉獻 (扣除本輪收入 10%)
+        // 十一奉獻
         if (p.roundIncome > 0) {
             let tithe = Math.floor(p.roundIncome * CONFIG.titheRate);
             p.cash -= tithe;
             logs.push(`十一奉獻 -$${tithe}`);
         }
 
-        // 6. 生活費
+        // 生活費
         p.cash -= CONFIG.livingCost;
-        // logs.push(`生活費 -$${CONFIG.livingCost}`);
 
-        // 7. 銀行活存利息
+        // 活存利息
         let currentRate = p.rate + p.tempRateBoost;
         let bankInterest = Math.floor(p.bank * currentRate);
         if (bankInterest > 0) {
             p.bank += bankInterest;
             logs.push(`銀行利息(${(currentRate*100).toFixed(1)}%) +$${bankInterest}`);
         }
-        
-        // 重置臨時利率
         p.tempRateBoost = 0;
 
-        // 8. 破產保護 / 負債處理
+        // 破產保護
         if (p.cash < 0) {
             let needed = -p.cash;
             if (p.bank >= needed) {
                 p.bank -= needed;
                 p.cash = 0;
-                logs.push(`⚠️ 現金不足，從銀行自動轉帳 $${needed}`);
+                logs.push(`⚠️ 現金不足，銀行自動轉帳 $${needed}`);
             } else {
-                // 銀行也不夠
-                p.cash += p.bank; // 把銀行剩的拿來抵債
+                p.cash += p.bank;
                 p.bank = 0;
-                // 此時 cash 仍是負的
                 logs.push(`❌ 嚴重財務危機！負債 $${p.cash}`);
             }
         }
@@ -519,7 +547,6 @@ function processTurn() {
     });
 
     gameState.turn++;
-    
     if (gameState.turn > CONFIG.maxTurns) {
         endGame();
     } else {
@@ -530,31 +557,15 @@ function processTurn() {
 }
 
 function handleRandomEvents() {
-    // 30% 機率發生事件
     if (Math.random() > 0.3) return;
-
     const events = [
-        {
-            text: "😷 季節性流感爆發，全體需要看醫生。",
-            effect: (p) => { p.cash -= 20; return "-$20"; }
-        },
-        {
-            text: "🎉 統一發票中獎！",
-            effect: (p) => { p.cash += 30; return "+$30"; }
-        },
-        {
-            text: "📉 全球股市震盪，銀行緊急降息。",
-            effect: (p) => { p.tempRateBoost -= 0.005; return "本輪利率 -0.5%"; }
-        },
-        {
-            text: "🌧️ 颱風來襲，房屋修繕費用。",
-            effect: (p) => { p.cash -= 15; return "-$15"; }
-        }
+        { text: "😷 流感來襲，看醫生花費 $20。", effect: (p) => { p.cash -= 20; return "-$20"; } },
+        { text: "🎉 發票中獎！獲得 $30。", effect: (p) => { p.cash += 30; return "+$30"; } },
+        { text: "📉 經濟不景氣，銀行降息。", effect: (p) => { p.tempRateBoost -= 0.005; return "本輪利率 -0.5%"; } },
+        { text: "🌧️ 颱風修繕費 $15。", effect: (p) => { p.cash -= 15; return "-$15"; } }
     ];
-
     let evt = events[Math.floor(Math.random() * events.length)];
     log(`[突發事件] ${evt.text}`, 'event');
-    
     gameState.players.forEach(p => {
         let res = evt.effect(p);
         log(`${p.name} 受到影響: ${res}`);
@@ -581,21 +592,15 @@ function endGame() {
             <button class="start-btn" onclick="location.reload()">重新開始</button>
         </div>
     `;
-    
     document.getElementById('cards-container').innerHTML = resultHTML;
 }
 
-// 計算還在定存或投資裡的錢（粗略估計現值）
 function getLockedAssets(p) {
     let locked = 0;
     p.lockedSavings.forEach(l => locked += l.amount);
-    // 投資還沒回收的算成本價回來嗎？這裡簡單算0，因為還沒回收，或者算一半
-    // 為了鼓勵短期變現，結束時未回收的投資視為虧損(或僅退回本金50%)
-    p.investments.forEach(i => locked += 0); 
     return locked;
 }
 
-// 輔助函式
 function randInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -620,11 +625,9 @@ function updateUI() {
     };
     document.getElementById('phase-display').innerText = phases[gameState.phase];
 
-    // 更新 A 組 UI
     updatePlayerUI(0, 'p1');
     updatePlayerUI(1, 'p2');
 
-    // 高亮當前玩家
     document.getElementById('p1-stats').classList.remove('active');
     document.getElementById('p2-stats').classList.remove('active');
     if (gameState.phase === 'p1_choice') document.getElementById('p1-stats').classList.add('active');
@@ -635,7 +638,6 @@ function updatePlayerUI(idx, prefix) {
     let p = gameState.players[idx];
     document.getElementById(`${prefix}-cash`).innerText = `$${p.cash}`;
     document.getElementById(`${prefix}-bank`).innerText = `$${p.bank}`;
-    
     let finalRate = (p.rate + p.tempRateBoost) * 100;
     document.getElementById(`${prefix}-rate`).innerText = `${finalRate.toFixed(1)}%`;
     document.getElementById(`${prefix}-income`).innerText = `$${p.roundIncome}`;
@@ -644,16 +646,11 @@ function updatePlayerUI(idx, prefix) {
     if (p.activeJobs.length > 0) status.push(`${p.activeJobs.length} 份工作`);
     if (p.investments.length > 0) status.push(`${p.investments.length} 筆投資`);
     if (p.lockedSavings.length > 0) status.push(`${p.lockedSavings.length} 筆定存`);
-    
     document.getElementById(`${prefix}-status`).innerText = status.length > 0 ? status.join(', ') : "無";
     
-    if (p.cash < 0) {
-        document.getElementById(`${prefix}-cash`).classList.add('debt');
-    } else {
-        document.getElementById(`${prefix}-cash`).classList.remove('debt');
-    }
+    if (p.cash < 0) document.getElementById(`${prefix}-cash`).classList.add('debt');
+    else document.getElementById(`${prefix}-cash`).classList.remove('debt');
 }
-
 </script>
 
 </body>
