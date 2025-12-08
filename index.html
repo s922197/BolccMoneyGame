@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v6.2 (Bug修復與統計版)</title>
+    <title>社畜生存戰：理財 Roguelike v6.3 (NaN與奉獻修正版)</title>
     <style>
         /* --- CSS 樣式區 --- */
         :root {
@@ -225,7 +225,7 @@
 
 <div class="container">
     <div id="setup-screen" style="text-align: center; margin-top: 50px;">
-        <h1>🏥 社畜生存戰：硬核平衡版 v6.2</h1>
+        <h1>🏥 社畜生存戰：硬核平衡版 v6.3</h1>
         <h3>高風險生存 x 理財 Roguelike</h3>
         <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; text-align: left;">
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
@@ -315,7 +315,7 @@ const CONFIG = {
     maxTurns: 20,
     startCash: 100,
     livingCost: 30, 
-    titheRate: 0.1,
+    titheRate: 0.1, // 十一奉獻比例
     baseRate: 0.01,
     startHp: 100,
     maxHp: 100,
@@ -402,7 +402,9 @@ function getCardCost(card) {
 
 // 核心扣款 (優先扣現，不足扣存，不可負債)
 function applyPayment(p, cost) {
-    let actualCost = cost;
+    let actualCost = Number(cost); // 確保是數字
+    if (isNaN(actualCost) || actualCost <= 0) return '無須支付';
+
     if (p.cash >= actualCost) {
         p.cash -= actualCost;
         return `成功支付 $${actualCost} (現金)`;
@@ -419,7 +421,9 @@ function applyPayment(p, cost) {
 }
 // 核心損失 (可負債)
 function applyLoss(p, loss) {
-    let actualLoss = loss;
+    let actualLoss = Number(loss); // 確保是數字
+    if (isNaN(actualLoss) || actualLoss <= 0) return 0;
+    
     if (p.cash >= actualLoss) {
         p.cash -= actualLoss;
     } else {
@@ -489,7 +493,17 @@ const generators = {
         const cost = 100; const returnAmt = 110; const turns = 3;
         return { title: '📜 政府公債', tag: '低風險', cost: cost, desc: `投入 $${cost}，${turns} 輪後保證回收 $${returnAmt}。`, effect: (p) => { const r = applyPayment(p, cost); if (r.includes('成功')) p.investments.push({ cost: cost, returnFixed: returnAmt, turnsLeft: turns, name: '公債' }); return `購買公債 (${r})`; } };
     },
-    depositFlexible: () => ({ title: '💰 彈性存款', tag: '活期存款', desc: `存入任意比例現金 (點擊輸入)。`, effect: (p, a) => { p.cash -= a; p.bank += a; return `存入 $${a}`; } }),
+    depositFlexible: () => ({ 
+        title: '💰 彈性存款', 
+        tag: '活期存款', 
+        desc: `存入任意比例現金 (點擊輸入)。`, 
+        effect: (p, a) => { 
+            let amt = Number(a);
+            if (isNaN(amt) || amt <= 0) return '存款失敗 (金額無效)';
+            p.cash -= amt; p.bank += amt; 
+            return `存入 $${amt}`; 
+        } 
+    }),
     depositFixed: () => {
         const turnsLeft = CONFIG.maxTurns - gameState.turn;
         const cost = randInt(100, 300);
@@ -612,11 +626,13 @@ function generateCards(playerIdx) {
     // 強制治療檢查
     if (player.hp <= CONFIG.forcedHealThreshold) {
         let restCard = generators.rest(player);
-        if (!gameState.currentCards.some(c => c.title === '🧘 深度休息')) {
+        const restIndex = gameState.currentCards.findIndex(c => c.title === '🧘 深度休息');
+        if (restIndex === -1) {
+             // 如果牌組中沒有，則替換第一張卡片
              gameState.currentCards[0] = restCard;
         } else {
-            const idx = gameState.currentCards.findIndex(c => c.title === '🧘 深度休息');
-            gameState.currentCards[idx] = restCard;
+            // 如果有，則更新成本
+            gameState.currentCards[restIndex] = restCard;
         }
     }
     renderCards();
@@ -650,7 +666,9 @@ function renderCards() {
         if (isForceHealing) {
             if (card.title === '🧘 深度休息') {
                 if (isDisabled) {
-                    // 如果連治療都付不起，理論上是死局，但為了避免卡住，這裡不做處理，讓下面的 confirmAction 處理或讓玩家等死
+                    // 如果連治療都付不起
+                    div.classList.add('disabled');
+                    clickText = `🚨 治療失敗 (資產不足)`;
                 } else {
                     div.classList.add('force-heal');
                     clickText = `🚨 必須治療 $${card.cost}`;
@@ -692,21 +710,27 @@ function handleCardClick(index) {
     if (card.title === '💰 彈性存款') {
         if (gameState.selectionCount + gameState.selectedIndices.length >= gameState.maxSelections) return;
         clearInterval(gameState.timer);
-        let input = prompt("輸入存款比例：20/50/ALL");
+        let input = prompt("輸入存款比例：20/50/ALL (或輸入實際金額)");
         startTimer(gameState.timeLeft);
         if (input) {
              let amt = 0;
              if (input.toUpperCase() === 'ALL') amt = player.cash;
              else if (input === '20') amt = Math.floor(player.cash * 0.2);
              else if (input === '50') amt = Math.floor(player.cash * 0.5);
+             else if (!isNaN(Number(input))) amt = Math.min(Number(input), player.cash);
              
+             amt = Math.floor(amt); // 確保是整數
+
              if (amt > 0) {
-                 log(card.effect(player, amt), 'good');
+                 const result = card.effect(player, amt);
+                 log(result, 'good');
                  gameState.selectionCount++;
-                 recordHistory(player, ['💰 彈性存款']); // 立即記錄
+                 recordHistory(player, [card.title]); // 立即記錄
                  updateUI();
                  cardElement.classList.add('disabled'); cardElement.onclick = null;
                  checkSelectionStatus(btn);
+             } else {
+                 log('存款金額無效或現金不足', 'bad');
              }
         }
         return;
@@ -779,7 +803,7 @@ function processTurn() {
     
     gameState.players.forEach(p => {
         let logs = [];
-        p.roundIncome = 0;
+        p.roundIncome = 0; // 重置本輪收入
         const multiplier = getIncomeMultiplier(p);
 
         // 工時健康
@@ -798,7 +822,7 @@ function processTurn() {
              p.sicknessCost += randInt(10, 50); p.hp -= 3; logs.push(`🚨 病情惡化，醫療費累計$${p.sicknessCost}`);
         }
         
-        // 收入
+        // 收入 - 1. 工作收入 (計算進 roundIncome)
         if (p.stableJob) {
             let pay = Math.floor(p.stableJob.pay * multiplier);
             p.cash += pay; p.roundIncome += pay;
@@ -809,13 +833,33 @@ function processTurn() {
         });
         p.partTimeJobs = p.partTimeJobs.filter(j => j.turnsLeft > 0);
         
-        // 股利
+        // 收入 - 2. 股利 (計算進 roundIncome)
         p.stocks.forEach(s => {
             let div = Math.floor(randInt(8, 15) * Math.floor(s.cost/100));
             p.cash += div; p.roundIncome += div;
         });
 
-        // 投資
+        // 結算 - 3. 利息 (計算進 roundIncome)
+        if (p.bank > 0) {
+            let r = CONFIG.baseRate + (p.tempRateBoost.turnsLeft > 0 ? p.tempRateBoost.amount : 0);
+            if (p.tempRateBoost.turnsLeft > 0) p.tempRateBoost.turnsLeft--;
+            let int = Math.floor(p.bank * r);
+            p.bank += int; p.roundIncome += int;
+        }
+
+        // 支出 - 1. 十一奉獻 (基於 roundIncome)
+        let tithe = Math.floor(p.roundIncome * CONFIG.titheRate);
+        if (tithe > 0) {
+            applyLoss(p, tithe);
+            logs.push(`🙏 十一奉獻 -$${tithe}`);
+        }
+
+        // 支出 - 2. 生活費用
+        let livingCost = CONFIG.livingCost;
+        applyLoss(p, livingCost);
+        logs.push(`🛒 生活費用 -$${livingCost}`);
+        
+        // 投資/定存
         p.investments = p.investments.filter(i => {
             i.turnsLeft--;
             if (i.turnsLeft === 0) {
@@ -845,19 +889,6 @@ function processTurn() {
             return true;
         });
 
-        // 支出
-        let ob = CONFIG.livingCost + Math.floor(p.roundIncome * CONFIG.titheRate);
-        applyLoss(p, ob);
-        logs.push(`生活費+奉獻 -$${ob}`);
-        
-        // 利息
-        if (p.bank > 0) {
-            let r = CONFIG.baseRate + (p.tempRateBoost.turnsLeft > 0 ? p.tempRateBoost.amount : 0);
-            if (p.tempRateBoost.turnsLeft > 0) p.tempRateBoost.turnsLeft--;
-            let int = Math.floor(p.bank * r);
-            p.bank += int; p.roundIncome += int;
-        }
-
         if (p.hp < 0) p.hp = 0;
         if (logs.length) log(`${p.name}: ${logs.join(' | ')}`);
     });
@@ -874,7 +905,10 @@ function handleGlobalEvents() {
         ];
         let e = evts[randInt(0, evts.length-1)];
         log(`[隨機] ${e.t} ${e.a>0?'-':'+'}$${Math.abs(e.a)}`);
-        gameState.players.forEach(p => { if(e.a>0) applyLoss(p, e.a); else p.cash+=Math.abs(e.a); });
+        gameState.players.forEach(p => { 
+            if(e.a>0) applyLoss(p, e.a); 
+            else p.cash+=Math.abs(e.a); 
+        });
     }
 }
 
@@ -953,7 +987,7 @@ function endGame() {
         report += `<div style="margin-bottom:10px;border-left:4px solid ${p.id===0?'#3498db':'#27ae60'};padding-left:10px;">
             <strong>${p.name}</strong> (HP: ${Math.floor(p.hp)})<br>
             總資產: <span class="total-asset">$${total}</span> | 投資: $${inv}<br>
-            現金/活存: ${p.cash} / ${p.bank}<br>
+            現金/活存: ${Math.floor(p.cash)} / ${Math.floor(p.bank)}<br>
             最後工作: ${p.stableJob ? p.stableJob.name : '無'}
         </div>`;
     });
