@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>社畜生存戰：理財 Roguelike v6.3 (NaN與奉獻修正版)</title>
+    <title>社畜生存戰：理財 Roguelike v6.4 (詐騙日誌修正版)</title>
     <style>
         /* --- CSS 樣式區 --- */
         :root {
@@ -225,7 +225,7 @@
 
 <div class="container">
     <div id="setup-screen" style="text-align: center; margin-top: 50px;">
-        <h1>🏥 社畜生存戰：硬核平衡版 v6.3</h1>
+        <h1>🏥 社畜生存戰：硬核平衡版 v6.4</h1>
         <h3>高風險生存 x 理財 Roguelike</h3>
         <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; text-align: left;">
             <p>✅ <b>目標：</b>20 輪後總資產最高者獲勝</p>
@@ -548,9 +548,29 @@ const generators = {
     },
 
     // 詐騙
-    scamCrypto: () => ({ title: '💥 飆升幣', tag: '詐騙', scamCost: true, desc: '投資虛擬幣？(高風險)', effect: (p) => { const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); const al = applyLoss(p, l); p.hp-=5; return `詐騙損失 $${al}`; } }),
-    scamSocial: () => ({ title: '❌ 國外高薪', tag: '詐騙', scamCost: true, desc: '國外工作機會？(高風險)', effect: (p) => { const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); const al = applyLoss(p, l); p.hp-=10; return `詐騙損失 $${al}`; } }),
-    scamInsurance: () => ({ title: '💸 高報酬保單', tag: '推銷', scamCost: true, desc: '強迫推銷保單？', effect: (p) => { const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); const al = applyLoss(p, l); return `推銷損失 $${al}`; } }),
+    scamCrypto: () => ({ title: '💥 飆升幣', tag: '詐騙', scamCost: true, desc: '投資虛擬幣？(高風險)', 
+        effect: (p) => { 
+            const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); 
+            const al = applyLoss(p, l); 
+            p.hp-=5; 
+            return `被詐騙損失 $${al}`; // 修正用語
+        } 
+    }),
+    scamSocial: () => ({ title: '❌ 國外高薪', tag: '詐騙', scamCost: true, desc: '國外工作機會？(高風險)', 
+        effect: (p) => { 
+            const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); 
+            const al = applyLoss(p, l); 
+            p.hp-=10; 
+            return `被詐騙損失 $${al}`; // 修正用語
+        } 
+    }),
+    scamInsurance: () => ({ title: '💸 高報酬保單', tag: '推銷', scamCost: true, desc: '強迫推銷保單？', 
+        effect: (p) => { 
+            const l = randInt(CONFIG.scamLossRange[0], CONFIG.scamLossRange[1]); 
+            const al = applyLoss(p, l); 
+            return `被詐騙損失 $${al}`; // 修正用語
+        } 
+    }),
 };
 
 // --- 邏輯控制區 ---
@@ -741,7 +761,8 @@ function handleCardClick(index) {
         if (gameState.selectionCount + gameState.selectedIndices.length >= gameState.maxSelections) return;
         
         // 執行效果並記錄
-        log(card.effect(player), 'scam');
+        // 新增玩家名稱到日誌中
+        log(`${player.name}: [${card.title}] ${card.effect(player)}`, 'scam'); 
         recordHistory(player, [card.title]);
         
         gameState.selectionCount++;
@@ -782,7 +803,8 @@ function confirmAction(isQuickAction = false) {
     let actions = [];
     gameState.selectedIndices.forEach(idx => {
         const card = gameState.currentCards[idx];
-        log(`[${card.title}] ${card.effect(player)}`);
+        // 正常行動卡片的日誌
+        log(`${player.name}: [${card.title}] ${card.effect(player)}`);
         actions.push(card.title);
     });
     
@@ -949,7 +971,7 @@ function updateUI() {
 function updatePlayerUI(idx, prefix) {
     const p = gameState.players[idx];
     const el = (id) => document.getElementById(`${prefix}-${id}`);
-    el('cash').innerText = `$${p.cash}`; el('bank').innerText = `$${p.bank}`;
+    el('cash').innerText = `$${Math.floor(p.cash)}`; el('bank').innerText = `$${Math.floor(p.bank)}`;
     el('investment-asset').innerText = `$${getAssets(p, false, true)}`;
     el('total-asset').innerText = `$${getAssets(p, true)}`;
     el('hp-text').innerText = Math.floor(p.hp) + (p.sicknessCost>0?` (病$${p.sicknessCost})`:'');
@@ -969,7 +991,7 @@ function getAssets(p, incCash, onlyInv) {
     p.stocks.forEach(s => v += s.cost);
     if (onlyInv) return v;
     if (incCash) v += (p.cash + p.bank);
-    return v;
+    return Math.floor(v);
 }
 function endGame() {
     clearInterval(gameState.timer);
